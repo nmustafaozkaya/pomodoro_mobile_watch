@@ -1,16 +1,40 @@
-# pomodoro
+# Pomodoro Timer - Phone & Smartwatch
 
-A new Flutter project.
+Bu uygulama hem telefonda hem de akıllı saatte çalışır ve Bluetooth üzerinden veri senkronizasyonu yapar.
 
-## Getting Started
+## Kurulum
 
-This project is a starting point for a Flutter application.
+### Telefon için:
+1. `flutter run` komutu ile telefon uygulamasını çalıştırın
+2. Uygulama otomatik olarak telefon modunda açılacak
 
-A few resources to get you started if this is your first Flutter project:
+### Akıllı Saat için:
+1. Akıllı saati USB ile bilgisayara bağlayın
+2. `flutter run -d <watch_device_id>` komutu ile saate yükleyin
+3. Veya Android Studio'da "Wear OS" target'ını seçip çalıştırın
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Özellikler
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Telefon Uygulaması:
+- Pomodoro timer
+- İstatistikler (günlük/aylık)
+- Dil ayarları (Türkçe/İngilizce)
+- Duvar kağıdı değiştirme
+- Akıllı saat verilerini görüntüleme
+
+### Akıllı Saat Uygulaması:
+- Kompakt timer arayüzü
+- 15-60 dakika arası süre seçimi
+- Toplam çalışma süresi takibi
+- Bluetooth ile telefona veri gönderme
+
+## Veri Senkronizasyonu
+
+Uygulama her 5 saniyede bir akıllı saatten telefon uygulamasına çalışma verilerini senkronize eder. İstatistikler sayfasında yeşil saat ikonu ile bağlantı durumu gösterilir.
+
+## Gereksinimler
+
+- Flutter 3.9.2+
+- Android 6.0+ (telefon)
+- Wear OS 2.0+ (akıllı saat)
+- Bluetooth bağlantısı
