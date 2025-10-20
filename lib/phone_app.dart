@@ -8,6 +8,7 @@ import 'settings_page.dart';
 import 'settings_model.dart';
 import 'statistics_model.dart';
 import 'dart:math' as math;
+import 'api_client.dart';
 
 class PhoneApp extends StatelessWidget {
   const PhoneApp({super.key});
@@ -38,6 +39,13 @@ class _PhoneHomeState extends State<PhoneHome> {
   late SettingsModel _settings;
   late StatisticsModel _statistics;
   String _currentWallpaper = 'wallpaper1.jpg';
+  static const String _apiBaseUrl = 'https://nmustafaozkaya.com.tr/api';
+  static const String _userId = 'mustafa';
+  late final ApiClient _apiClient = ApiClient(
+    baseUrl: _apiBaseUrl,
+    userId: _userId,
+  );
+  int _cloudTotalMinutes = 0;
 
   // Bluetooth/Wear OS communication
   static const platform = MethodChannel('com.pomodoro.phone/wear');
@@ -60,29 +68,43 @@ class _PhoneHomeState extends State<PhoneHome> {
     });
   }
 
-  List<Widget> get _pages => <Widget>[
-    _TimerPage(
-      settings: _settings,
-      wallpaper: _currentWallpaper,
-      statistics: _statistics,
-    ),
-    StatisticsPage(
-      settings: _settings,
-      statistics: _statistics,
-      wearData: _wearData,
-    ),
-    SettingsPage(
-      onWallpaperChanged: _onWallpaperChanged,
-      onLanguageChanged: _onLanguageChanged,
-    ),
-  ];
-
   void _onWallpaperChanged(String wallpaper) {
     setState(() {
       _currentWallpaper = wallpaper;
     });
     // Refresh all pages with new wallpaper
-    _refreshAllPages();
+  }
+
+  Widget _buildCurrentPage() {
+    switch (_selectedIndex) {
+      case 0:
+        return _TimerPage(
+          settings: _settings,
+          wallpaper: _currentWallpaper,
+          statistics: _statistics,
+          apiClient: _apiClient,
+        );
+      case 1:
+        return StatisticsPage(
+          key: ValueKey(_currentWallpaper),
+          settings: _settings,
+          statistics: _statistics,
+          wallpaper: _currentWallpaper,
+          wearData: {...?_wearData, 'cloudTotalMinutes': _cloudTotalMinutes},
+        );
+      case 2:
+        return SettingsPage(
+          onWallpaperChanged: _onWallpaperChanged,
+          onLanguageChanged: _onLanguageChanged,
+        );
+      default:
+        return _TimerPage(
+          settings: _settings,
+          wallpaper: _currentWallpaper,
+          statistics: _statistics,
+          apiClient: _apiClient,
+        );
+    }
   }
 
   void _onLanguageChanged(String language) async {
@@ -95,7 +117,8 @@ class _PhoneHomeState extends State<PhoneHome> {
 
   void _startWearDataSync() {
     Timer.periodic(const Duration(seconds: 5), (timer) {
-      _syncWearData();
+      // _syncWearData(); // Disabled for emulator - only use cloud data
+      _syncCloudStats();
     });
   }
 
@@ -113,15 +136,26 @@ class _PhoneHomeState extends State<PhoneHome> {
           await _statistics.recordSession(data['totalWorkMinutes']);
         }
       }
-    } on PlatformException {
+    } on PlatformException catch (e) {
       // Failed to sync wear data - continue without sync
+      print('Wear data sync failed: ${e.message}');
     }
   }
 
-  void _refreshAllPages() {
-    setState(() {
-      // This will refresh all pages with new wallpaper
-    });
+  Future<void> _syncCloudStats() async {
+    try {
+      final stats = await _apiClient.fetchStats();
+      setState(() {
+        _cloudTotalMinutes = stats['totalMinutes'] ?? 0;
+        // Update _wearData with cloud data for statistics
+        _wearData = {
+          'totalWorkMinutes': stats['totalMinutes'] ?? 0,
+          'recent': stats['recent'] ?? [],
+        };
+      });
+    } catch (_) {
+      // ignore errors
+    }
   }
 
   @override
@@ -139,7 +173,7 @@ class _PhoneHomeState extends State<PhoneHome> {
             ),
           ),
           // Sayfa içeriği
-          _pages[_selectedIndex],
+          _buildCurrentPage(),
           // Navbar en üstte
           Positioned(
             bottom: 0,
@@ -150,7 +184,14 @@ class _PhoneHomeState extends State<PhoneHome> {
               elevation: 0,
               type: BottomNavigationBarType.fixed,
               currentIndex: _selectedIndex,
-              onTap: (index) => setState(() => _selectedIndex = index),
+              onTap: (index) async {
+                if (index == 1) {
+                  // Refresh stats when navigating to Statistics tab
+                  await _statistics.loadStatistics();
+                  await _syncCloudStats();
+                }
+                setState(() => _selectedIndex = index);
+              },
               selectedItemColor: Colors.white,
               unselectedItemColor: Colors.white70,
               items: [
@@ -179,11 +220,13 @@ class _TimerPage extends StatefulWidget {
   final SettingsModel settings;
   final String wallpaper;
   final StatisticsModel statistics;
+  final ApiClient apiClient;
 
   const _TimerPage({
     required this.settings,
     required this.wallpaper,
     required this.statistics,
+    required this.apiClient,
   });
 
   @override
@@ -299,6 +342,13 @@ class _TimerPageState extends State<_TimerPage> {
   Future<void> _recordCompletedSession() async {
     if (_sessionStartMinutes > 0) {
       await widget.statistics.recordSession(_sessionStartMinutes);
+      // Cloud'a da yaz (fire-and-forget)
+      // ignore: discarded_futures
+      widget.apiClient.postSession(
+        source: 'phone',
+        minutes: _sessionStartMinutes,
+        timestampMs: DateTime.now().millisecondsSinceEpoch,
+      );
       _sessionStartMinutes = 0;
     }
   }
@@ -306,6 +356,13 @@ class _TimerPageState extends State<_TimerPage> {
   // Timer sıfırlandığında kısmi session kaydet
   Future<void> _recordPartialSession(int workedMinutes) async {
     await widget.statistics.recordSession(workedMinutes);
+    // Cloud'a da yaz (fire-and-forget)
+    // ignore: discarded_futures
+    widget.apiClient.postSession(
+      source: 'phone',
+      minutes: workedMinutes,
+      timestampMs: DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
   void _toggleTimeSelector() {

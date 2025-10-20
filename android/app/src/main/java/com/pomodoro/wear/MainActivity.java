@@ -11,6 +11,7 @@ import org.json.JSONObject;
 public class MainActivity extends FlutterActivity {
     private static final String CHANNEL = "com.pomodoro.wear/data";
     private static final String PREFS_NAME = "pomodoro_work_data";
+    private static final String PREFS_SETTINGS = "pomodoro_phone_settings"; // optional: where we might cache phone settings on wear
 
     @Override
     public void configureFlutterEngine(FlutterEngine flutterEngine) {
@@ -27,6 +28,9 @@ public class MainActivity extends FlutterActivity {
                                 Object timestamp = call.argument("timestamp");
                                 saveWorkData(data, sessionMinutes, timestamp);
                                 result.success("Data saved");
+                            } else if (call.method.equals("getInitialSettings")) {
+                                String settings = getInitialSettings();
+                                result.success(settings);
                             } else {
                                 result.notImplemented();
                             }
@@ -61,5 +65,28 @@ public class MainActivity extends FlutterActivity {
         }
         
         editor.apply();
+    }
+
+    private String getInitialSettings() {
+        // Try to read cached settings on wear (for emulator/testing). In real scenarios, this should be populated via Data Layer from phone.
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE);
+            int durationSeconds = prefs.getInt("durationSeconds", 1500);
+            String language = prefs.getString("language", "tr");
+
+            JSONObject data = new JSONObject();
+            data.put("durationSeconds", durationSeconds);
+            data.put("language", language);
+            return data.toString();
+        } catch (Exception e) {
+            try {
+                JSONObject fallback = new JSONObject();
+                fallback.put("durationSeconds", 1500);
+                fallback.put("language", "tr");
+                return fallback.toString();
+            } catch (Exception ex) {
+                return "{}";
+            }
+        }
     }
 }

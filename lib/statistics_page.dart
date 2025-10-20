@@ -5,12 +5,14 @@ import 'statistics_model.dart';
 class StatisticsPage extends StatefulWidget {
   final SettingsModel settings;
   final StatisticsModel statistics;
+  final String wallpaper;
   final Map<String, dynamic>? wearData;
 
   const StatisticsPage({
     super.key,
     required this.settings,
     required this.statistics,
+    required this.wallpaper,
     this.wearData,
   });
 
@@ -32,56 +34,127 @@ class _StatisticsPageState extends State<StatisticsPage> {
     setState(() {});
   }
 
+  // Cloud verilerini parse eden helper metodlar
+  int _getCloudTodayMinutes() {
+    final cloudData = widget.wearData?['recent'] as List?;
+    if (cloudData == null) return 0;
+
+    final today = DateTime.now();
+    final todayKey =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
+    int totalMinutes = 0;
+    for (final session in cloudData) {
+      if (session is Map<String, dynamic>) {
+        final ts = session['ts'] as int?;
+        if (ts != null) {
+          final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+          final sessionKey =
+              '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}-${sessionDate.day.toString().padLeft(2, '0')}';
+          if (sessionKey == todayKey) {
+            totalMinutes += session['minutes'] as int? ?? 0;
+          }
+        }
+      }
+    }
+    return totalMinutes;
+  }
+
+  int _getCloudThisMonthMinutes() {
+    final cloudData = widget.wearData?['recent'] as List?;
+    if (cloudData == null) return 0;
+
+    final now = DateTime.now();
+    final thisMonthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+
+    int totalMinutes = 0;
+    for (final session in cloudData) {
+      if (session is Map<String, dynamic>) {
+        final ts = session['ts'] as int?;
+        if (ts != null) {
+          final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+          final sessionMonthKey =
+              '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}';
+          if (sessionMonthKey == thisMonthKey) {
+            totalMinutes += session['minutes'] as int? ?? 0;
+          }
+        }
+      }
+    }
+    return totalMinutes;
+  }
+
+  List<MapEntry<String, int>> _combineMonthlyStats(
+    List<MapEntry<String, int>> localMonths,
+  ) {
+    final cloudData = widget.wearData?['recent'] as List?;
+    if (cloudData == null) return localMonths;
+
+    final Map<String, int> combinedMonths = Map.fromEntries(localMonths);
+
+    for (final session in cloudData) {
+      if (session is Map<String, dynamic>) {
+        final ts = session['ts'] as int?;
+        if (ts != null) {
+          final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+          final monthKey =
+              '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}';
+          final minutes = session['minutes'] as int? ?? 0;
+          combinedMonths[monthKey] = (combinedMonths[monthKey] ?? 0) + minutes;
+        }
+      }
+    }
+
+    return combinedMonths.entries.toList()
+      ..sort((a, b) => b.key.compareTo(a.key));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        image: DecorationImage(
-          image: AssetImage(
-            'assets/wallpaper/${widget.settings.currentWallpaper}',
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/wallpaper/${widget.wallpaper}'),
+            fit: BoxFit.cover,
           ),
-          fit: BoxFit.cover,
         ),
-      ),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            8.0,
-            8.0,
-            8.0,
-            80.0,
-          ), // More bottom padding for navbar
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  const Icon(Icons.analytics, color: Colors.white, size: 32),
-                  const SizedBox(width: 12),
-                  Text(
-                    widget.settings.getText('statistics'),
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              8.0,
+              8.0,
+              8.0,
+              80.0,
+            ), // More bottom padding for navbar
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  children: [
+                    const Icon(Icons.analytics, color: Colors.white, size: 32),
+                    const SizedBox(width: 12),
+                    Text(
+                      widget.settings.getText('statistics'),
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
+                  ],
+                ),
+                const SizedBox(height: 12),
 
-              // Tab Selector
-              _buildTabSelector(),
-              const SizedBox(height: 6),
+                // Tab Selector
+                _buildTabSelector(),
+                const SizedBox(height: 6),
 
-              // Total at top
-              _buildTotalCard(),
-              const SizedBox(height: 6),
-
-              // Statistics Content
-              Expanded(child: _buildStatisticsContent()),
-            ],
+                // Statistics Content
+                Expanded(child: _buildStatisticsContent()),
+              ],
+            ),
           ),
         ),
       ),
@@ -143,12 +216,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Widget _buildDailyStats() {
-    final todayMinutes = widget.statistics.getTodayMinutes();
-    final recentDays = widget.statistics.getRecentDays();
+    final localTodayMinutes = widget.statistics.getTodayMinutes();
+    final cloudTodayMinutes = _getCloudTodayMinutes();
+    final todayMinutes = localTodayMinutes + cloudTodayMinutes;
 
     return Column(
       children: [
-        // Today's stats
+        // Today's total stats
         _buildStatsCard(
           widget.settings.getText('today'),
           widget.statistics.formatMinutes(
@@ -156,6 +230,34 @@ class _StatisticsPageState extends State<StatisticsPage> {
             language: widget.settings.currentLanguage,
           ),
           Icons.today,
+        ),
+        const SizedBox(height: 4),
+
+        // Phone and Watch separate stats
+        Row(
+          children: [
+            Expanded(
+              child: _buildSmallStatsCard(
+                'Telefon',
+                widget.statistics.formatMinutes(
+                  localTodayMinutes,
+                  language: widget.settings.currentLanguage,
+                ),
+                Icons.phone_android,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: _buildSmallStatsCard(
+                'Saat',
+                widget.statistics.formatMinutes(
+                  cloudTodayMinutes,
+                  language: widget.settings.currentLanguage,
+                ),
+                Icons.watch,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
 
@@ -193,7 +295,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
-                    children: recentDays
+                    children: widget.statistics
+                        .getRecentDays()
                         .map(
                           (day) => Padding(
                             padding: const EdgeInsets.symmetric(
@@ -215,12 +318,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Widget _buildMonthlyStats() {
-    final thisMonthMinutes = widget.statistics.getThisMonthMinutes();
-    final monthlyStats = widget.statistics.getMonthlyStats();
+    final localThisMonthMinutes = widget.statistics.getThisMonthMinutes();
+    final cloudThisMonthMinutes = _getCloudThisMonthMinutes();
+    final thisMonthMinutes = localThisMonthMinutes + cloudThisMonthMinutes;
+    final localMonthlyStats = widget.statistics.getMonthlyStats();
+    final combinedMonthlyStats = _combineMonthlyStats(localMonthlyStats);
 
     return Column(
       children: [
-        // This month's stats
+        // This month's total stats
         _buildStatsCard(
           widget.settings.getText('this_month'),
           widget.statistics.formatMinutes(
@@ -261,7 +367,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
-                    children: monthlyStats
+                    children: combinedMonthlyStats
                         .map(
                           (month) => Padding(
                             padding: const EdgeInsets.symmetric(
@@ -279,6 +385,52 @@ class _StatisticsPageState extends State<StatisticsPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildMonthItem(String monthKey, int minutes) {
+    final month = widget.statistics.formatMonthForDisplay(monthKey);
+    final thisMonth = DateTime.now();
+    final itemMonth = DateTime.parse('$monthKey-01');
+    final isThisMonth =
+        itemMonth.year == thisMonth.year && itemMonth.month == thisMonth.month;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isThisMonth
+            ? Colors.white.withValues(alpha: 0.2)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        border: isThisMonth
+            ? Border.all(color: Colors.white.withValues(alpha: 0.3))
+            : null,
+      ),
+      child: Row(
+        children: [
+          Text(
+            isThisMonth ? widget.settings.getText('this_month') : month,
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: isThisMonth ? FontWeight.bold : FontWeight.normal,
+              fontSize: 18,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            widget.statistics.formatMinutes(
+              minutes,
+              language: widget.settings.currentLanguage,
+            ),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 18,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -313,6 +465,38 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSmallStatsCard(String title, String value, IconData icon) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
@@ -365,97 +549,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildMonthItem(String monthKey, int minutes) {
-    final month = widget.statistics.formatMonthForDisplay(monthKey);
-    final thisMonth = DateTime.now();
-    final itemMonth = DateTime.parse('$monthKey-01');
-    final isThisMonth =
-        itemMonth.year == thisMonth.year && itemMonth.month == thisMonth.month;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: isThisMonth
-            ? Colors.white.withValues(alpha: 0.2)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
-        border: isThisMonth
-            ? Border.all(color: Colors.white.withValues(alpha: 0.3))
-            : null,
-      ),
-      child: Row(
-        children: [
-          Text(
-            isThisMonth ? widget.settings.getText('this_month') : month,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: isThisMonth ? FontWeight.bold : FontWeight.normal,
-              fontSize: 18,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            widget.statistics.formatMinutes(
-              minutes,
-              language: widget.settings.currentLanguage,
-            ),
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTotalCard() {
-    final totalMinutes = widget.statistics.getTotalMinutes();
-
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Row(
-          children: [
-            const Icon(Icons.all_inclusive, color: Colors.white, size: 24),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.settings.getText('total_work_time'),
-                    style: const TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.statistics.formatMinutes(
-                      totalMinutes,
-                      language: widget.settings.currentLanguage,
-                    ),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

@@ -11,6 +11,7 @@ import org.json.JSONObject;
 public class MainActivity extends FlutterActivity {
     private static final String CHANNEL = "com.pomodoro.phone/wear";
     private static final String PREFS_NAME = "pomodoro_phone_data";
+    private static final String PREFS_SETTINGS = "pomodoro_phone_settings";
 
     @Override
     public void configureFlutterEngine(FlutterEngine flutterEngine) {
@@ -25,6 +26,22 @@ public class MainActivity extends FlutterActivity {
                                 Object data = call.arguments;
                                 sendDataToWear(data);
                                 result.success("Data sent to wear");
+                            } else if (call.method.equals("setInitialSettings")) {
+                                // Allow the phone app to save desired initial settings so wear can read them on boot (emulator-friendly)
+                                try {
+                                    String json = (String) call.arguments;
+                                    JSONObject obj = new JSONObject(json);
+                                    int durationSeconds = obj.optInt("durationSeconds", 1500);
+                                    String language = obj.optString("language", "tr");
+                                    SharedPreferences prefs = getSharedPreferences(PREFS_SETTINGS, Context.MODE_PRIVATE);
+                                    SharedPreferences.Editor editor = prefs.edit();
+                                    editor.putInt("durationSeconds", durationSeconds);
+                                    editor.putString("language", language);
+                                    editor.apply();
+                                    result.success("Settings saved");
+                                } catch (Exception e) {
+                                    result.error("SETTINGS_ERROR", e.getMessage(), null);
+                                }
                             } else {
                                 result.notImplemented();
                             }
@@ -39,6 +56,10 @@ public class MainActivity extends FlutterActivity {
             data.put("lastSessionMinutes", prefs.getInt("lastSessionMinutes", 25));
             data.put("lastUpdate", prefs.getLong("lastUpdate", 0));
             data.put("isConnected", prefs.getBoolean("isConnected", false));
+            
+            // Add empty recent array for cloud data (will be filled by API)
+            data.put("recent", new org.json.JSONArray());
+            
             return data.toString();
         } catch (Exception e) {
             return "{}";
