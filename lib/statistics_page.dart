@@ -35,9 +35,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   // Cloud verilerini parse eden helper metodlar
-  int _getCloudTodayMinutes() {
+  int _getCloudTodayMinutes({String? source}) {
     final cloudData = widget.wearData?['recent'] as List?;
-    if (cloudData == null) return 0;
+    if (cloudData == null || cloudData.isEmpty) return 0;
 
     final today = DateTime.now();
     final todayKey =
@@ -47,22 +47,43 @@ class _StatisticsPageState extends State<StatisticsPage> {
     for (final session in cloudData) {
       if (session is Map<String, dynamic>) {
         final ts = session['ts'] as int?;
-        if (ts != null) {
-          final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
-          final sessionKey =
-              '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}-${sessionDate.day.toString().padLeft(2, '0')}';
-          if (sessionKey == todayKey) {
-            totalMinutes += session['minutes'] as int? ?? 0;
+        if (ts == null) continue;
+        
+        final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+        final sessionKey =
+            '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}-${sessionDate.day.toString().padLeft(2, '0')}';
+        
+        // Bugünkü session'ları kontrol et
+        if (sessionKey == todayKey) {
+          // Source kontrolü
+          if (source != null) {
+            final sessionSource = session['source'];
+            if (sessionSource == null) {
+              // Source yok - eğer telefon aranıyorsa say (telefon uygulamasından gönderildiği için)
+              if (source.toLowerCase() == 'phone') {
+                totalMinutes += session['minutes'] as int? ?? 0;
+              }
+              continue;
+            }
+            // String'e çevir ve case-insensitive karşılaştır
+            final sessionSourceStr = sessionSource.toString().toLowerCase().trim();
+            final sourceStr = source.toLowerCase().trim();
+            
+            // Source eşleşmesi kontrolü
+            if (sessionSourceStr != sourceStr) {
+              continue; // Source eşleşmiyor, atla
+            }
           }
+          totalMinutes += session['minutes'] as int? ?? 0;
         }
       }
     }
     return totalMinutes;
   }
 
-  int _getCloudThisMonthMinutes() {
+  int _getCloudThisMonthMinutes({String? source}) {
     final cloudData = widget.wearData?['recent'] as List?;
-    if (cloudData == null) return 0;
+    if (cloudData == null || cloudData.isEmpty) return 0;
 
     final now = DateTime.now();
     final thisMonthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
@@ -71,26 +92,45 @@ class _StatisticsPageState extends State<StatisticsPage> {
     for (final session in cloudData) {
       if (session is Map<String, dynamic>) {
         final ts = session['ts'] as int?;
-        if (ts != null) {
-          final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
-          final sessionMonthKey =
-              '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}';
-          if (sessionMonthKey == thisMonthKey) {
-            totalMinutes += session['minutes'] as int? ?? 0;
+        if (ts == null) continue;
+        
+        final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+        final sessionMonthKey =
+            '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}';
+        
+        // Bu ayın session'larını kontrol et
+        if (sessionMonthKey == thisMonthKey) {
+          // Source kontrolü
+          if (source != null) {
+            final sessionSource = session['source'];
+            if (sessionSource == null) {
+              // Source yok - eğer telefon aranıyorsa say (telefon uygulamasından gönderildiği için)
+              if (source.toLowerCase() == 'phone') {
+                totalMinutes += session['minutes'] as int? ?? 0;
+              }
+              continue;
+            }
+            // String'e çevir ve case-insensitive karşılaştır
+            final sessionSourceStr = sessionSource.toString().toLowerCase().trim();
+            final sourceStr = source.toLowerCase().trim();
+            
+            // Source eşleşmesi kontrolü
+            if (sessionSourceStr != sourceStr) {
+              continue; // Source eşleşmiyor, atla
+            }
           }
+          totalMinutes += session['minutes'] as int? ?? 0;
         }
       }
     }
     return totalMinutes;
   }
 
-  List<MapEntry<String, int>> _combineMonthlyStats(
-    List<MapEntry<String, int>> localMonths,
-  ) {
+  List<MapEntry<String, int>> _getCloudMonthlyStats() {
     final cloudData = widget.wearData?['recent'] as List?;
-    if (cloudData == null) return localMonths;
+    if (cloudData == null) return [];
 
-    final Map<String, int> combinedMonths = Map.fromEntries(localMonths);
+    final Map<String, int> monthlyStats = {};
 
     for (final session in cloudData) {
       if (session is Map<String, dynamic>) {
@@ -100,13 +140,46 @@ class _StatisticsPageState extends State<StatisticsPage> {
           final monthKey =
               '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}';
           final minutes = session['minutes'] as int? ?? 0;
-          combinedMonths[monthKey] = (combinedMonths[monthKey] ?? 0) + minutes;
+          monthlyStats[monthKey] = (monthlyStats[monthKey] ?? 0) + minutes;
         }
       }
     }
 
-    return combinedMonths.entries.toList()
+    return monthlyStats.entries.toList()
       ..sort((a, b) => b.key.compareTo(a.key));
+  }
+
+  // Cloud verilerinden günlük istatistikleri al
+  List<MapEntry<String, int>> _getCloudDailyStats() {
+    final cloudData = widget.wearData?['recent'] as List?;
+    if (cloudData == null) return [];
+
+    final Map<String, int> dailyStats = {};
+
+    for (final session in cloudData) {
+      if (session is Map<String, dynamic>) {
+        final ts = session['ts'] as int?;
+        if (ts != null) {
+          final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+          final dateKey =
+              '${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}-${sessionDate.day.toString().padLeft(2, '0')}';
+          final minutes = session['minutes'] as int? ?? 0;
+          dailyStats[dateKey] = (dailyStats[dateKey] ?? 0) + minutes;
+        }
+      }
+    }
+
+    // Son 7 günü al
+    final now = DateTime.now();
+    final recentDays = <MapEntry<String, int>>[];
+    for (int i = 0; i < 7; i++) {
+      final date = now.subtract(Duration(days: i));
+      final dateKey =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      recentDays.add(MapEntry(dateKey, dailyStats[dateKey] ?? 0));
+    }
+
+    return recentDays.reversed.toList();
   }
 
   @override
@@ -216,9 +289,30 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Widget _buildDailyStats() {
-    final localTodayMinutes = widget.statistics.getTodayMinutes();
+    // Sadece cloud verilerini kullan (çift kayıt önlemek için)
     final cloudTodayMinutes = _getCloudTodayMinutes();
-    final todayMinutes = localTodayMinutes + cloudTodayMinutes;
+    final phoneTodayMinutes = _getCloudTodayMinutes(source: 'phone');
+    final watchTodayMinutes = _getCloudTodayMinutes(source: 'watch');
+    
+    // Debug: Cloud verilerini kontrol et (geçici)
+    final cloudData = widget.wearData?['recent'] as List?;
+    if (cloudData != null && cloudData.isNotEmpty) {
+      for (var session in cloudData) {
+        if (session is Map<String, dynamic>) {
+          final ts = session['ts'] as int?;
+          if (ts != null) {
+            final sessionDate = DateTime.fromMillisecondsSinceEpoch(ts);
+            final today = DateTime.now();
+            if (sessionDate.year == today.year && 
+                sessionDate.month == today.month && 
+                sessionDate.day == today.day) {
+              // print('Today session - source: ${session['source']}, minutes: ${session['minutes']}');
+            }
+          }
+        }
+      }
+    }
+    
 
     return Column(
       children: [
@@ -226,21 +320,21 @@ class _StatisticsPageState extends State<StatisticsPage> {
         _buildStatsCard(
           widget.settings.getText('today'),
           widget.statistics.formatMinutes(
-            todayMinutes,
+            cloudTodayMinutes,
             language: widget.settings.currentLanguage,
           ),
           Icons.today,
         ),
         const SizedBox(height: 4),
 
-        // Phone and Watch separate stats
+        // Phone and Watch separate stats (her zaman göster)
         Row(
           children: [
             Expanded(
               child: _buildSmallStatsCard(
                 'Telefon',
                 widget.statistics.formatMinutes(
-                  localTodayMinutes,
+                  phoneTodayMinutes,
                   language: widget.settings.currentLanguage,
                 ),
                 Icons.phone_android,
@@ -251,7 +345,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               child: _buildSmallStatsCard(
                 'Saat',
                 widget.statistics.formatMinutes(
-                  cloudTodayMinutes,
+                  watchTodayMinutes,
                   language: widget.settings.currentLanguage,
                 ),
                 Icons.watch,
@@ -295,8 +389,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
-                    children: widget.statistics
-                        .getRecentDays()
+                    children: _getCloudDailyStats()
                         .map(
                           (day) => Padding(
                             padding: const EdgeInsets.symmetric(
@@ -318,11 +411,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Widget _buildMonthlyStats() {
-    final localThisMonthMinutes = widget.statistics.getThisMonthMinutes();
+    // Sadece cloud verilerini kullan (çift kayıt önlemek için)
     final cloudThisMonthMinutes = _getCloudThisMonthMinutes();
-    final thisMonthMinutes = localThisMonthMinutes + cloudThisMonthMinutes;
-    final localMonthlyStats = widget.statistics.getMonthlyStats();
-    final combinedMonthlyStats = _combineMonthlyStats(localMonthlyStats);
+    final cloudMonthlyStats = _getCloudMonthlyStats();
 
     return Column(
       children: [
@@ -330,7 +421,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
         _buildStatsCard(
           widget.settings.getText('this_month'),
           widget.statistics.formatMinutes(
-            thisMonthMinutes,
+            cloudThisMonthMinutes,
             language: widget.settings.currentLanguage,
           ),
           Icons.calendar_month,
@@ -367,7 +458,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
-                    children: combinedMonthlyStats
+                    children: cloudMonthlyStats
                         .map(
                           (month) => Padding(
                             padding: const EdgeInsets.symmetric(

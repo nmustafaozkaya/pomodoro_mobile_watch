@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'statistics_page.dart';
 import 'settings_page.dart';
@@ -47,9 +45,9 @@ class _PhoneHomeState extends State<PhoneHome> {
   );
   int _cloudTotalMinutes = 0;
 
-  // Bluetooth/Wear OS communication
-  static const platform = MethodChannel('com.pomodoro.phone/wear');
+  // Wear data storage (populated from cloud sync)
   Map<String, dynamic>? _wearData;
+  Timer? _syncTimer;
 
   @override
   void initState() {
@@ -61,17 +59,30 @@ class _PhoneHomeState extends State<PhoneHome> {
   }
 
   Future<void> _loadSettings() async {
-    await _settings.loadSettings();
-    await _statistics.loadStatistics();
-    setState(() {
-      _currentWallpaper = _settings.currentWallpaper;
-    });
+    try {
+      await _settings.loadSettings();
+      await _statistics.loadStatistics();
+      if (mounted) {
+        setState(() {
+          _currentWallpaper = _settings.currentWallpaper;
+        });
+      }
+    } catch (e) {
+      // Hata durumunda varsayılan değerlerle devam et
+      if (mounted) {
+        setState(() {
+          _currentWallpaper = 'wallpaper1.jpg';
+        });
+      }
+    }
   }
 
   void _onWallpaperChanged(String wallpaper) {
-    setState(() {
-      _currentWallpaper = wallpaper;
-    });
+    if (mounted) {
+      setState(() {
+        _currentWallpaper = wallpaper;
+      });
+    }
     // Refresh all pages with new wallpaper
   }
 
@@ -79,6 +90,7 @@ class _PhoneHomeState extends State<PhoneHome> {
     switch (_selectedIndex) {
       case 0:
         return _TimerPage(
+          key: const ValueKey('timer_page'), // Timer state'ini korumak için key
           settings: _settings,
           wallpaper: _currentWallpaper,
           statistics: _statistics,
@@ -99,6 +111,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         );
       default:
         return _TimerPage(
+          key: const ValueKey('timer_page'), // Timer state'ini korumak için key
           settings: _settings,
           wallpaper: _currentWallpaper,
           statistics: _statistics,
@@ -108,54 +121,72 @@ class _PhoneHomeState extends State<PhoneHome> {
   }
 
   void _onLanguageChanged(String language) async {
-    // Reload settings to get updated language
-    await _settings.loadSettings();
-    setState(() {
-      // This will trigger a rebuild with the new language
-    });
+    try {
+      // Reload settings to get updated language
+      await _settings.loadSettings();
+      if (mounted) {
+        setState(() {
+          // This will trigger a rebuild with the new language
+        });
+      }
+    } catch (e) {
+      // Hata durumunda sessizce devam et
+    }
   }
 
   void _startWearDataSync() {
-    Timer.periodic(const Duration(seconds: 5), (timer) {
-      // _syncWearData(); // Disabled for emulator - only use cloud data
+    _syncTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      // Wear data sync disabled for emulator - only use cloud data
       _syncCloudStats();
     });
   }
 
-  Future<void> _syncWearData() async {
-    try {
-      final String result = await platform.invokeMethod('getWearData');
-      if (result.isNotEmpty) {
-        final data = json.decode(result);
-        setState(() {
-          _wearData = data;
-        });
-
-        // Sync work data to statistics
-        if (data['totalWorkMinutes'] != null) {
-          await _statistics.recordSession(data['totalWorkMinutes']);
-        }
-      }
-    } on PlatformException catch (e) {
-      // Failed to sync wear data - continue without sync
-      print('Wear data sync failed: ${e.message}');
-    }
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _syncCloudStats() async {
+    if (!mounted) return;
     try {
       final stats = await _apiClient.fetchStats();
-      setState(() {
-        _cloudTotalMinutes = stats['totalMinutes'] ?? 0;
-        // Update _wearData with cloud data for statistics
-        _wearData = {
-          'totalWorkMinutes': stats['totalMinutes'] ?? 0,
-          'recent': stats['recent'] ?? [],
-        };
-      });
+      if (mounted) {
+        setState(() {
+          _cloudTotalMinutes = stats['totalMinutes'] ?? 0;
+          // Update _wearData with cloud data for statistics
+          _wearData = {
+            'totalWorkMinutes': stats['totalMinutes'] ?? 0,
+            'recent': stats['recent'] ?? [],
+          };
+        });
+      }
     } catch (_) {
       // ignore errors
     }
+  }
+
+  Widget _buildBackground() {
+    return Stack(
+      children: [
+        // Fallback background color
+        Container(color: Colors.deepPurple.shade900),
+        // Wallpaper image with error handling
+        Image.asset(
+          'assets/wallpaper/$_currentWallpaper',
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            // Asset yükleme hatası durumunda boş widget döndür
+            // (arka plandaki renk görünecek)
+            return const SizedBox.shrink();
+          },
+        ),
+      ],
+    );
   }
 
   @override
@@ -164,14 +195,7 @@ class _PhoneHomeState extends State<PhoneHome> {
       body: Stack(
         children: [
           // Arka plan resmi tüm ekranı kaplasın
-          Container(
-            decoration: BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/wallpaper/$_currentWallpaper'),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
+          _buildBackground(),
           // Sayfa içeriği
           _buildCurrentPage(),
           // Navbar en üstte
@@ -223,6 +247,7 @@ class _TimerPage extends StatefulWidget {
   final ApiClient apiClient;
 
   const _TimerPage({
+    super.key,
     required this.settings,
     required this.wallpaper,
     required this.statistics,
@@ -233,7 +258,8 @@ class _TimerPage extends StatefulWidget {
   State<_TimerPage> createState() => _TimerPageState();
 }
 
-class _TimerPageState extends State<_TimerPage> {
+class _TimerPageState extends State<_TimerPage>
+    with AutomaticKeepAliveClientMixin {
   Timer? _timer;
   int _secondsRemaining = 25 * 60; // 25 dakika
   int _selectedMinutes = 25; // Seçilen dakika
@@ -242,7 +268,10 @@ class _TimerPageState extends State<_TimerPage> {
   bool _showTimeSelector = false;
   late ScrollController _scrollController;
   Timer? _autoSelectTimer;
-  int _sessionStartMinutes = 0; // Timer başladığında kaydedilen dakika
+  int _sessionStartSeconds = 0; // Timer başladığında kaydedilen toplam saniye
+
+  @override
+  bool get wantKeepAlive => true; // Widget state'ini koru
 
   @override
   void initState() {
@@ -255,7 +284,7 @@ class _TimerPageState extends State<_TimerPage> {
     _showTimeSelector = false;
     // Başlangıç pozisyonunu seçili dakikaya ayarla
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
+      if (mounted && _scrollController.hasClients) {
         int index = _selectedMinutes - 1; // 0-based index
         double itemHeight = 45.0;
         // Basit hesaplama - index * itemHeight
@@ -285,14 +314,20 @@ class _TimerPageState extends State<_TimerPage> {
 
   void _startTimer() {
     if (_isPaused) {
+      // Pause'dan devam ediyor, yeni session başlatma
       _isPaused = false;
       _isRunning = true;
     } else {
+      // Yeni session başlatılıyor
       _isRunning = true;
-      _sessionStartMinutes = _selectedMinutes; // Timer başladığında kaydet
+      _sessionStartSeconds = _secondsRemaining; // Başlangıç saniyesini kaydet
     }
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       setState(() {
         if (_secondsRemaining > 0) {
           _secondsRemaining--;
@@ -306,6 +341,7 @@ class _TimerPageState extends State<_TimerPage> {
 
           _secondsRemaining =
               _selectedMinutes * 60; // Reset to selected minutes
+          _sessionStartSeconds = 0; // Session bitti, sıfırla
         }
       });
     });
@@ -313,50 +349,60 @@ class _TimerPageState extends State<_TimerPage> {
 
   void _pauseTimer() {
     _timer?.cancel();
-    setState(() {
-      _isRunning = false;
-      _isPaused = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isRunning = false;
+        _isPaused = true;
+      });
+    }
   }
 
   void _resetTimer() {
     _timer?.cancel();
 
     // Eğer timer çalışıyorsa ve sıfırlanıyorsa, mevcut çalışılan süreyi kaydet
-    if (_sessionStartMinutes > 0) {
-      final workedMinutes = _sessionStartMinutes - (_secondsRemaining ~/ 60);
-      if (workedMinutes > 0) {
+    if (_sessionStartSeconds > 0) {
+      // Çalışılan saniyeyi hesapla
+      final workedSeconds = _sessionStartSeconds - _secondsRemaining;
+      // Sadece tam dakikaları kaydet (60 saniye = 1 dakika)
+      // En az 60 saniye çalışılmışsa kaydet
+      if (workedSeconds >= 60) {
+        final workedMinutes = workedSeconds ~/ 60; // Tam dakikaları al
         _recordPartialSession(workedMinutes);
       }
     }
 
-    setState(() {
-      _isRunning = false;
-      _isPaused = false;
-      _secondsRemaining = _selectedMinutes * 60;
-      _sessionStartMinutes = 0;
-    });
+    if (mounted) {
+      setState(() {
+        _isRunning = false;
+        _isPaused = false;
+        _secondsRemaining = _selectedMinutes * 60;
+        _sessionStartSeconds = 0; // Session sıfırlandı
+      });
+    }
   }
 
   // Timer tamamlandığında çalışan session kaydet
   Future<void> _recordCompletedSession() async {
-    if (_sessionStartMinutes > 0) {
-      await widget.statistics.recordSession(_sessionStartMinutes);
-      // Cloud'a da yaz (fire-and-forget)
-      // ignore: discarded_futures
-      widget.apiClient.postSession(
-        source: 'phone',
-        minutes: _sessionStartMinutes,
-        timestampMs: DateTime.now().millisecondsSinceEpoch,
-      );
-      _sessionStartMinutes = 0;
+    if (_sessionStartSeconds > 0) {
+      // Tamamlanan session'da başlangıç dakikasını hesapla
+      final sessionMinutes = _sessionStartSeconds ~/ 60;
+      if (sessionMinutes > 0) {
+        // Sadece cloud'a gönder, local'e kaydetme (çift kayıt önlemek için)
+        // ignore: discarded_futures
+        widget.apiClient.postSession(
+          source: 'phone',
+          minutes: sessionMinutes,
+          timestampMs: DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+      _sessionStartSeconds = 0;
     }
   }
 
   // Timer sıfırlandığında kısmi session kaydet
   Future<void> _recordPartialSession(int workedMinutes) async {
-    await widget.statistics.recordSession(workedMinutes);
-    // Cloud'a da yaz (fire-and-forget)
+    // Sadece cloud'a gönder, local'e kaydetme (çift kayıt önlemek için)
     // ignore: discarded_futures
     widget.apiClient.postSession(
       source: 'phone',
@@ -366,7 +412,7 @@ class _TimerPageState extends State<_TimerPage> {
   }
 
   void _toggleTimeSelector() {
-    if (!_isRunning) {
+    if (!_isRunning && mounted) {
       // Timer seçiciyi direkt aç
       setState(() {
         _showTimeSelector = true;
@@ -374,7 +420,7 @@ class _TimerPageState extends State<_TimerPage> {
 
       // Timer seçici açıldığında seçili dakikaya scroll et
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
+        if (mounted && _scrollController.hasClients) {
           int index = _selectedMinutes - 1; // 1, 2, 3... için index hesapla
           double itemHeight = 45.0;
           // Seçili sayıyı ortaya getir
@@ -396,6 +442,7 @@ class _TimerPageState extends State<_TimerPage> {
   }
 
   void _selectCurrentCenterTime() {
+    if (!mounted) return;
     // Şu an ortada olan dakikayı seç ve timer seçiciyi kapat
     setState(() {
       _showTimeSelector = false;
@@ -457,6 +504,7 @@ class _TimerPageState extends State<_TimerPage> {
   }
 
   void _onScrollUpdate(ScrollMetrics metrics) {
+    if (!mounted) return;
     // Scroll sırasında ortadaki dakikayı seç
     double itemHeight = 45.0;
 
@@ -503,6 +551,7 @@ class _TimerPageState extends State<_TimerPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin için gerekli
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(

@@ -1,0 +1,7 @@
+{
+  // Disable Java Language Server for Flutter projects
+  "java.configuration.updateBuildConfiguration": "disabled",
+  "java.import.enabled": false,
+  "java.jdt.ls.java.home": null
+}
+

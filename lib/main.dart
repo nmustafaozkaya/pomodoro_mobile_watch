@@ -29,8 +29,13 @@ class MyApp extends StatelessWidget {
 }
 
 Future<bool> _isWearOS() async {
-  if (!Platform.isAndroid) return false;
-  final info = await DeviceInfoPlugin().androidInfo;
-  final features = info.systemFeatures;
-  return features.contains('android.hardware.type.watch');
+  try {
+    if (!Platform.isAndroid) return false;
+    final info = await DeviceInfoPlugin().androidInfo;
+    final features = info.systemFeatures;
+    return features.contains('android.hardware.type.watch');
+  } catch (e) {
+    // Hata durumunda phone app olarak devam et
+    return false;
+  }
 }
