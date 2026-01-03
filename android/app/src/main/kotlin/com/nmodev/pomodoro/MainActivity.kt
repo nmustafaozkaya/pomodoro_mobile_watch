@@ -1,5 +1,6 @@
-package com.example.pomodoro
+package com.nmodev.pomodoro
 
 import io.flutter.embedding.android.FlutterActivity
 
 class MainActivity : FlutterActivity()
+

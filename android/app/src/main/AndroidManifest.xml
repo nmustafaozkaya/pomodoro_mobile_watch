@@ -1,9 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-feature android:name="android.hardware.type.watch" />
+    <!-- Wear OS özelliği - Phone flavor'da remove edilir -->
+    <uses-feature android:name="android.hardware.type.watch" android:required="true" />
+    
+    <!-- İzinler - Her iki platform için ortak -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    
     <application
-        android:label="pomodoro"
+        android:label="Pomodoro Timer"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

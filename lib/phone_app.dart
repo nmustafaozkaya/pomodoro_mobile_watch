@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:vibration/vibration.dart';
 import 'statistics_page.dart';
 import 'settings_page.dart';
 import 'settings_model.dart';
 import 'statistics_model.dart';
 import 'dart:math' as math;
 import 'api_client.dart';
+import 'user_id_helper.dart';
 
 class PhoneApp extends StatelessWidget {
   const PhoneApp({super.key});
@@ -14,11 +17,15 @@ class PhoneApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Pomodoro - Phone',
+      title: 'Pomodoro Timer',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: Brightness.light,
+        ),
         useMaterial3: true,
         textTheme: GoogleFonts.robotoTextTheme(),
+        scaffoldBackgroundColor: Colors.white, // Splash ile uyumlu
       ),
       home: const PhoneHome(),
     );
@@ -37,13 +44,12 @@ class _PhoneHomeState extends State<PhoneHome> {
   late SettingsModel _settings;
   late StatisticsModel _statistics;
   String _currentWallpaper = 'wallpaper1.jpg';
-  static const String _apiBaseUrl = 'https://nmustafaozkaya.com.tr/api';
-  static const String _userId = 'mustafa';
-  late final ApiClient _apiClient = ApiClient(
-    baseUrl: _apiBaseUrl,
-    userId: _userId,
-  );
+  static const String _apiBaseUrl = 'http://52.59.192.113:4001/api';
+  ApiClient? _apiClient;
+  String? _userId;
   int _cloudTotalMinutes = 0;
+  bool _isWallpaperLoaded = false; // Wallpaper yükleme durumu
+  bool _isTimerRunning = false; // Timer çalışıyor mu?
 
   // Wear data storage (populated from cloud sync)
   Map<String, dynamic>? _wearData;
@@ -54,18 +60,37 @@ class _PhoneHomeState extends State<PhoneHome> {
     super.initState();
     _settings = SettingsModel();
     _statistics = StatisticsModel();
+    _initializeUserId();
     _loadSettings();
-    _startWearDataSync();
+    _preloadWallpaper(); // Wallpaper'ı önceden yükle
+  }
+
+  Future<void> _initializeUserId() async {
+    _userId = await getOrCreateUserId();
+    _apiClient = ApiClient(
+      baseUrl: _apiBaseUrl,
+      userId: _userId!,
+    );
+    if (mounted) {
+      setState(() {});
+      _startWearDataSync();
+    }
   }
 
   Future<void> _loadSettings() async {
     try {
       await _settings.loadSettings();
       await _statistics.loadStatistics();
-      if (mounted) {
-        setState(() {
-          _currentWallpaper = _settings.currentWallpaper;
-        });
+      
+      final newWallpaper = _settings.currentWallpaper;
+      if (newWallpaper != _currentWallpaper) {
+        // Wallpaper değişmiş, yeniden yükle
+        if (mounted) {
+          setState(() {
+            _currentWallpaper = newWallpaper;
+          });
+        }
+        await _preloadWallpaper();
       }
     } catch (e) {
       // Hata durumunda varsayılan değerlerle devam et
@@ -74,27 +99,61 @@ class _PhoneHomeState extends State<PhoneHome> {
           _currentWallpaper = 'wallpaper1.jpg';
         });
       }
+      await _preloadWallpaper();
     }
   }
 
-  void _onWallpaperChanged(String wallpaper) {
+  // Wallpaper'ı önceden yükle (görsel olmadan ekran gösterme)
+  Future<void> _preloadWallpaper() async {
+    try {
+      // Mevcut wallpaper'ı yükle
+      final image = AssetImage('assets/wallpaper/$_currentWallpaper');
+      await precacheImage(image, context);
+      
+      if (mounted) {
+        setState(() {
+          _isWallpaperLoaded = true;
+        });
+      }
+    } catch (e) {
+      // Hata durumunda yine de devam et
+      if (mounted) {
+        setState(() {
+          _isWallpaperLoaded = true;
+        });
+      }
+    }
+  }
+
+  void _onWallpaperChanged(String wallpaper) async {
     if (mounted) {
       setState(() {
         _currentWallpaper = wallpaper;
+        _isWallpaperLoaded = false; // Yeni wallpaper yüklenecek
       });
+      
+      // Yeni wallpaper'ı yükle
+      await _preloadWallpaper();
     }
-    // Refresh all pages with new wallpaper
   }
 
   Widget _buildCurrentPage() {
     switch (_selectedIndex) {
       case 0:
+        if (_apiClient == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
         return _TimerPage(
           key: const ValueKey('timer_page'), // Timer state'ini korumak için key
           settings: _settings,
           wallpaper: _currentWallpaper,
           statistics: _statistics,
-          apiClient: _apiClient,
+          apiClient: _apiClient!,
+          onTimerStateChanged: (isRunning) {
+            setState(() {
+              _isTimerRunning = isRunning;
+            });
+          },
         );
       case 1:
         return StatisticsPage(
@@ -110,12 +169,20 @@ class _PhoneHomeState extends State<PhoneHome> {
           onLanguageChanged: _onLanguageChanged,
         );
       default:
+        if (_apiClient == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
         return _TimerPage(
           key: const ValueKey('timer_page'), // Timer state'ini korumak için key
           settings: _settings,
           wallpaper: _currentWallpaper,
           statistics: _statistics,
-          apiClient: _apiClient,
+          apiClient: _apiClient!,
+          onTimerStateChanged: (isRunning) {
+            setState(() {
+              _isTimerRunning = isRunning;
+            });
+          },
         );
     }
   }
@@ -135,7 +202,8 @@ class _PhoneHomeState extends State<PhoneHome> {
   }
 
   void _startWearDataSync() {
-    _syncTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+    // Her 3 dakikada bir cloud sync - maliyeti düşürmek için
+    _syncTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -152,9 +220,9 @@ class _PhoneHomeState extends State<PhoneHome> {
   }
 
   Future<void> _syncCloudStats() async {
-    if (!mounted) return;
+    if (!mounted || _apiClient == null) return;
     try {
-      final stats = await _apiClient.fetchStats();
+      final stats = await _apiClient!.fetchStats();
       if (mounted) {
         setState(() {
           _cloudTotalMinutes = stats['totalMinutes'] ?? 0;
@@ -173,8 +241,8 @@ class _PhoneHomeState extends State<PhoneHome> {
   Widget _buildBackground() {
     return Stack(
       children: [
-        // Fallback background color
-        Container(color: Colors.deepPurple.shade900),
+        // Fallback background color - splash ile uyumlu beyaz
+        Container(color: Colors.white),
         // Wallpaper image with error handling
         Image.asset(
           'assets/wallpaper/$_currentWallpaper',
@@ -191,50 +259,69 @@ class _PhoneHomeState extends State<PhoneHome> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          // Arka plan resmi tüm ekranı kaplasın
-          _buildBackground(),
-          // Sayfa içeriği
-          _buildCurrentPage(),
-          // Navbar en üstte
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: BottomNavigationBar(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              type: BottomNavigationBarType.fixed,
-              currentIndex: _selectedIndex,
-              onTap: (index) async {
-                if (index == 1) {
-                  // Refresh stats when navigating to Statistics tab
-                  await _statistics.loadStatistics();
-                  await _syncCloudStats();
-                }
-                setState(() => _selectedIndex = index);
-              },
-              selectedItemColor: Colors.white,
-              unselectedItemColor: Colors.white70,
-              items: [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.timer),
-                  label: _settings.getText('timer'),
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.analytics),
-                  label: _settings.getText('statistics'),
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.settings),
-                  label: _settings.getText('settings'),
-                ),
-              ],
-            ),
+    // Wallpaper yüklenene kadar loading göster
+    if (!_isWallpaperLoaded) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: Colors.deepPurple,
           ),
-        ],
+        ),
+      );
+    }
+    
+    return Scaffold(
+      backgroundColor: Colors.white, // Splash ile uyumlu
+      extendBodyBehindAppBar: true,
+      body: SafeArea(
+        top: true,
+        bottom: false,
+        child: Stack(
+          children: [
+            // Arka plan resmi tüm ekranı kaplasın
+            _buildBackground(),
+            // Sayfa içeriği
+            _buildCurrentPage(),
+            // Navbar en üstte (timer çalışıyorsa gizle)
+            if (!_isTimerRunning)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: BottomNavigationBar(
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  type: BottomNavigationBarType.fixed,
+                  currentIndex: _selectedIndex,
+                  onTap: (index) async {
+                    if (index == 1) {
+                      // Refresh stats when navigating to Statistics tab
+                      await _statistics.loadStatistics();
+                      await _syncCloudStats();
+                    }
+                    setState(() => _selectedIndex = index);
+                  },
+                  selectedItemColor: Colors.white,
+                  unselectedItemColor: Colors.white70,
+                  items: [
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.timer),
+                      label: _settings.getText('timer'),
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.analytics),
+                      label: _settings.getText('statistics'),
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.settings),
+                      label: _settings.getText('settings'),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -245,6 +332,7 @@ class _TimerPage extends StatefulWidget {
   final String wallpaper;
   final StatisticsModel statistics;
   final ApiClient apiClient;
+  final Function(bool) onTimerStateChanged; // Timer durumu callback
 
   const _TimerPage({
     super.key,
@@ -252,6 +340,7 @@ class _TimerPage extends StatefulWidget {
     required this.wallpaper,
     required this.statistics,
     required this.apiClient,
+    required this.onTimerStateChanged,
   });
 
   @override
@@ -269,6 +358,7 @@ class _TimerPageState extends State<_TimerPage>
   late ScrollController _scrollController;
   Timer? _autoSelectTimer;
   int _sessionStartSeconds = 0; // Timer başladığında kaydedilen toplam saniye
+  final AudioPlayer _audioPlayer = AudioPlayer(); // Alarm sesi için
 
   @override
   bool get wantKeepAlive => true; // Widget state'ini koru
@@ -276,6 +366,9 @@ class _TimerPageState extends State<_TimerPage>
   @override
   void initState() {
     super.initState();
+    // Kaydedilmiş timer dakikasını yükle
+    _selectedMinutes = widget.settings.selectedMinutes;
+    _secondsRemaining = _selectedMinutes * 60;
     // Scroll controller'ı daha yüksek initial offset ile başlat
     _scrollController = ScrollController(
       initialScrollOffset: 0.0, // En üstten başla
@@ -305,11 +398,70 @@ class _TimerPageState extends State<_TimerPage>
   }
 
   @override
+  void didUpdateWidget(_TimerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Widget güncellendiğinde (sekmeler arası geçişte) kaydedilmiş değeri kontrol et
+    final savedMinutes = widget.settings.selectedMinutes;
+    if (savedMinutes != _selectedMinutes && !_isRunning && !_isPaused) {
+      // Timer çalışmıyorsa kaydedilmiş değere güncelle
+      setState(() {
+        _selectedMinutes = savedMinutes;
+        _secondsRemaining = savedMinutes * 60;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _timer?.cancel();
     _autoSelectTimer?.cancel();
     _scrollController.dispose();
+    _audioPlayer.dispose(); // AudioPlayer'ı temizle
     super.dispose();
+  }
+
+  // Timer bitince alarm çal ve titre
+  Future<void> _playAlarmAndVibrate() async {
+    try {
+      // Kullanıcının seçtiği alarm sesini çal
+      final soundPath = widget.settings.getAlarmSoundPath();
+      
+      if (soundPath != null) {
+        // Alarm sesini 1 kez çal (loop yok) ve 5 saniye sonra durdur
+        await _audioPlayer.stop(); // Önce durdur (eğer çalıyorsa)
+        await _audioPlayer.play(
+          AssetSource(soundPath),
+          mode: PlayerMode.mediaPlayer, // Loop yok
+        );
+        
+        // 5 saniye sonra alarm sesini durdur
+        Future.delayed(const Duration(seconds: 5), () {
+          _audioPlayer.stop();
+        });
+      }
+      
+      // Titreşim (her zaman çalışır, ses olsa da olmasa da)
+      final hasVibrator = await Vibration.hasVibrator();
+      if (hasVibrator) {
+        // 3 kez kısa titreşim (~3 saniye toplam)
+        await Vibration.vibrate(duration: 400);
+        await Future.delayed(const Duration(milliseconds: 300));
+        await Vibration.vibrate(duration: 400);
+        await Future.delayed(const Duration(milliseconds: 300));
+        await Vibration.vibrate(duration: 400);
+      }
+    } catch (e) {
+      // Ses dosyası yoksa veya hata varsa sadece titreşim yap
+      try {
+        final hasVibrator = await Vibration.hasVibrator();
+        if (hasVibrator) {
+          // Uzun titreşim (1 saniye)
+          await Vibration.vibrate(duration: 1000);
+        }
+      } catch (_) {
+        // Hiçbir şey yapma, sessizce devam et
+      }
+    }
   }
 
   void _startTimer() {
@@ -322,6 +474,9 @@ class _TimerPageState extends State<_TimerPage>
       _isRunning = true;
       _sessionStartSeconds = _secondsRemaining; // Başlangıç saniyesini kaydet
     }
+
+    // Parent'a timer başladığını bildir
+    widget.onTimerStateChanged(true);
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
@@ -336,12 +491,18 @@ class _TimerPageState extends State<_TimerPage>
           _isRunning = false;
           _isPaused = false;
 
-          // Timer tamamlandığında istatistikleri kaydet
+          // Timer tamamlandığında alarm çal ve titre
+          _playAlarmAndVibrate();
+
+          // İstatistikleri kaydet
           _recordCompletedSession();
 
           _secondsRemaining =
               _selectedMinutes * 60; // Reset to selected minutes
           _sessionStartSeconds = 0; // Session bitti, sıfırla
+          
+          // Parent'a timer durduğunu bildir
+          widget.onTimerStateChanged(false);
         }
       });
     });
@@ -354,6 +515,8 @@ class _TimerPageState extends State<_TimerPage>
         _isRunning = false;
         _isPaused = true;
       });
+      // Parent'a timer durduğunu bildir (pause)
+      widget.onTimerStateChanged(false);
     }
   }
 
@@ -379,6 +542,8 @@ class _TimerPageState extends State<_TimerPage>
         _secondsRemaining = _selectedMinutes * 60;
         _sessionStartSeconds = 0; // Session sıfırlandı
       });
+      // Parent'a timer durduğunu bildir (reset)
+      widget.onTimerStateChanged(false);
     }
   }
 
@@ -388,7 +553,10 @@ class _TimerPageState extends State<_TimerPage>
       // Tamamlanan session'da başlangıç dakikasını hesapla
       final sessionMinutes = _sessionStartSeconds ~/ 60;
       if (sessionMinutes > 0) {
-        // Sadece cloud'a gönder, local'e kaydetme (çift kayıt önlemek için)
+        // 1. Önce lokal'e kaydet (offline çalışma için)
+        await widget.statistics.recordSession(sessionMinutes);
+        
+        // 2. Sonra cloud'a gönder (senkronizasyon için)
         // ignore: discarded_futures
         widget.apiClient.postSession(
           source: 'phone',
@@ -402,7 +570,10 @@ class _TimerPageState extends State<_TimerPage>
 
   // Timer sıfırlandığında kısmi session kaydet
   Future<void> _recordPartialSession(int workedMinutes) async {
-    // Sadece cloud'a gönder, local'e kaydetme (çift kayıt önlemek için)
+    // 1. Önce lokal'e kaydet (offline çalışma için)
+    await widget.statistics.recordSession(workedMinutes);
+    
+    // 2. Sonra cloud'a gönder (senkronizasyon için)
     // ignore: discarded_futures
     widget.apiClient.postSession(
       source: 'phone',
@@ -448,6 +619,9 @@ class _TimerPageState extends State<_TimerPage>
       _showTimeSelector = false;
     });
     _autoSelectTimer?.cancel();
+
+    // Seçilen dakikayı kaydet (timer seçici kapanırken)
+    widget.settings.setSelectedMinutes(_selectedMinutes);
 
     // Scroll pozisyonunu koru
     if (_scrollController.hasClients) {
@@ -524,6 +698,9 @@ class _TimerPageState extends State<_TimerPage>
         _secondsRemaining = minutes * 60;
       });
 
+      // Seçilen dakikayı kaydet
+      widget.settings.setSelectedMinutes(minutes);
+
       // Scroll yapıldığında 800ms timer'ı yeniden başlat
       _autoSelectTimer?.cancel();
       _autoSelectTimer = Timer(const Duration(milliseconds: 800), () {
@@ -552,6 +729,22 @@ class _TimerPageState extends State<_TimerPage>
   @override
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin için gerekli
+    
+    // Build sırasında kaydedilmiş değeri kontrol et (timer çalışmıyorsa)
+    if (!_isRunning && !_isPaused) {
+      final savedMinutes = widget.settings.selectedMinutes;
+      if (savedMinutes != _selectedMinutes) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _selectedMinutes = savedMinutes;
+              _secondsRemaining = savedMinutes * 60;
+            });
+          }
+        });
+      }
+    }
+    
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(

@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SettingsModel {
   static const String _languageKey = 'language';
   static const String _wallpaperKey = 'wallpaper';
+  static const String _selectedMinutesKey = 'selected_minutes';
+  static const String _alarmSoundKey = 'alarm_sound';
 
   static const String turkish = 'tr';
   static const String english = 'en';
@@ -12,11 +14,20 @@ class SettingsModel {
   static const String wallpaper3 = 'walpaper3.jpg';
   static const String wallpaper4 = 'walpaper4.jpg';
 
-  String _currentLanguage = turkish;
+  // Alarm sesleri (kullanıcının eklediği dosyalar)
+  static const String alarm1 = 'alarm1.mp3';
+  static const String alarm2 = 'alarm2.mp3';
+  static const String alarmNone = 'none'; // Sessiz
+
+  String _currentLanguage = english; // Varsayılan dil İngilizce
   String _currentWallpaper = wallpaper1;
+  int _selectedMinutes = 25; // Varsayılan 25 dakika
+  String _currentAlarmSound = alarm1; // Varsayılan ses
 
   String get currentLanguage => _currentLanguage;
   String get currentWallpaper => _currentWallpaper;
+  int get selectedMinutes => _selectedMinutes;
+  String get currentAlarmSound => _currentAlarmSound;
 
   // Language getters
   String get languageName {
@@ -36,11 +47,27 @@ class SettingsModel {
     wallpaper4,
   ];
 
+  // Mevcut alarm sesleri
+  List<Map<String, String>> get availableAlarmSounds => [
+    {'id': alarm1, 'name': getText('alarm_1')},
+    {'id': alarm2, 'name': getText('alarm_2')},
+    {'id': alarmNone, 'name': getText('alarm_none')},
+  ];
+
+  // Ses dosyası adını al (none hariç)
+  String? getAlarmSoundPath() {
+    if (_currentAlarmSound == alarmNone) return null;
+    return 'sounds/$_currentAlarmSound';
+  }
+
   // Load settings from SharedPreferences
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    _currentLanguage = prefs.getString(_languageKey) ?? turkish;
+    _currentLanguage =
+        prefs.getString(_languageKey) ?? english; // Varsayılan İngilizce
     _currentWallpaper = prefs.getString(_wallpaperKey) ?? wallpaper1;
+    _selectedMinutes = prefs.getInt(_selectedMinutesKey) ?? 25;
+    _currentAlarmSound = prefs.getString(_alarmSoundKey) ?? alarm1;
   }
 
   // Save language setting
@@ -55,6 +82,20 @@ class SettingsModel {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_wallpaperKey, wallpaper);
     _currentWallpaper = wallpaper;
+  }
+
+  // Save selected timer minutes
+  Future<void> setSelectedMinutes(int minutes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_selectedMinutesKey, minutes);
+    _selectedMinutes = minutes;
+  }
+
+  // Save alarm sound setting
+  Future<void> setAlarmSound(String soundId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_alarmSoundKey, soundId);
+    _currentAlarmSound = soundId;
   }
 
   // Toggle language
@@ -76,7 +117,7 @@ class SettingsModel {
   static const Map<String, String> _turkishTexts = {
     'settings': 'Ayarlar',
     'language': 'Dil',
-    'wallpaper': 'Duvar Kağıdı',
+    'wallpaper': 'Duvar Kağıtları',
     'timer': 'Zamanlayıcı',
     'statistics': 'İstatistikler',
     'start': 'Başlat',
@@ -97,13 +138,17 @@ class SettingsModel {
     'total_work_time': 'Toplam Çalışma Süresi',
     'daily': 'Günlük',
     'monthly': 'Aylık',
+    'alarm_sound': 'Alarm Sesi',
+    'alarm_1': '🔔 Alarm 1',
+    'alarm_2': '🎵 Alarm 2',
+    'alarm_none': '🔇 Sessiz (Sadece Titreşim)',
   };
 
   // English texts
   static const Map<String, String> _englishTexts = {
     'settings': 'Settings',
     'language': 'Language',
-    'wallpaper': 'Wallpaper',
+    'wallpaper': 'Wallpapers',
     'timer': 'Timer',
     'statistics': 'Statistics',
     'start': 'Start',
@@ -124,5 +169,9 @@ class SettingsModel {
     'total_work_time': 'Total Work Time',
     'daily': 'Daily',
     'monthly': 'Monthly',
+    'alarm_sound': 'Alarm Sound',
+    'alarm_1': '🔔 Alarm 1',
+    'alarm_2': '🎵 Alarm 2',
+    'alarm_none': '🔇 Silent (Vibration Only)',
   };
 }
