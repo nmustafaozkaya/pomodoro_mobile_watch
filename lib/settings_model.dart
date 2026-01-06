@@ -4,6 +4,7 @@ class SettingsModel {
   static const String _languageKey = 'language';
   static const String _wallpaperKey = 'wallpaper';
   static const String _selectedMinutesKey = 'selected_minutes';
+  static const String _breakMinutesKey = 'break_minutes';
   static const String _alarmSoundKey = 'alarm_sound';
 
   static const String turkish = 'tr';
@@ -22,11 +23,13 @@ class SettingsModel {
   String _currentLanguage = english; // Varsayılan dil İngilizce
   String _currentWallpaper = wallpaper1;
   int _selectedMinutes = 25; // Varsayılan 25 dakika
+  int _breakMinutes = 5; // Varsayılan 5 dakika ara
   String _currentAlarmSound = alarm1; // Varsayılan ses
 
   String get currentLanguage => _currentLanguage;
   String get currentWallpaper => _currentWallpaper;
   int get selectedMinutes => _selectedMinutes;
+  int get breakMinutes => _breakMinutes;
   String get currentAlarmSound => _currentAlarmSound;
 
   // Language getters
@@ -67,6 +70,7 @@ class SettingsModel {
         prefs.getString(_languageKey) ?? english; // Varsayılan İngilizce
     _currentWallpaper = prefs.getString(_wallpaperKey) ?? wallpaper1;
     _selectedMinutes = prefs.getInt(_selectedMinutesKey) ?? 25;
+    _breakMinutes = prefs.getInt(_breakMinutesKey) ?? 5;
     _currentAlarmSound = prefs.getString(_alarmSoundKey) ?? alarm1;
   }
 
@@ -89,6 +93,13 @@ class SettingsModel {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_selectedMinutesKey, minutes);
     _selectedMinutes = minutes;
+  }
+
+  // Save break minutes
+  Future<void> setBreakMinutes(int minutes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_breakMinutesKey, minutes);
+    _breakMinutes = minutes;
   }
 
   // Save alarm sound setting
@@ -142,6 +153,10 @@ class SettingsModel {
     'alarm_1': '🔔 Alarm 1',
     'alarm_2': '🎵 Alarm 2',
     'alarm_none': '🔇 Sessiz (Sadece Titreşim)',
+    'pomodoro': 'Pomodoro',
+    'break': 'Ara',
+    'break_time': 'Ara Süresi',
+    'skip': 'Atla',
   };
 
   // English texts
@@ -173,5 +188,9 @@ class SettingsModel {
     'alarm_1': '🔔 Alarm 1',
     'alarm_2': '🎵 Alarm 2',
     'alarm_none': '🔇 Silent (Vibration Only)',
+    'pomodoro': 'Pomodoro',
+    'break': 'Break',
+    'break_time': 'Break Time',
+    'skip': 'Skip',
   };
 }

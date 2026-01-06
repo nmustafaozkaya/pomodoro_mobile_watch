@@ -5,5 +5,17 @@
     <uses-feature 
         android:name="android.hardware.type.watch" 
         tools:node="remove" />
+    
+    <application>
+        <!-- Data Layer Listener Service -->
+        <service
+            android:name="com.nmodev.pomodoro.DataLayerListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data android:scheme="wear" android:host="*" />
+            </intent-filter>
+        </service>
+        
+    </application>
 </manifest>
-

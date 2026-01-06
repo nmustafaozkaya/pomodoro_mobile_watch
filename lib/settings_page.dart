@@ -6,11 +6,19 @@ import 'privacy_policy_page.dart';
 import 'user_id_helper.dart';
 
 class SettingsPage extends StatefulWidget {
+  /// Dışarıdan hazır gelen ayarlar modeli (PhoneHome'dan paylaşılır)
+  final SettingsModel settings;
+
+  /// Arka planda gösterilecek mevcut duvar kağıdı (PhoneHome ile senkron)
+  final String wallpaper;
+
   final Function(String) onWallpaperChanged;
   final Function(String) onLanguageChanged;
 
   const SettingsPage({
     super.key,
+    required this.settings,
+    required this.wallpaper,
     required this.onWallpaperChanged,
     required this.onLanguageChanged,
   });
@@ -19,16 +27,21 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
-  final SettingsModel _settings = SettingsModel();
-  bool _isLoading = true;
+class _SettingsPageState extends State<SettingsPage>
+    with AutomaticKeepAliveClientMixin {
+  late final SettingsModel _settings;
   String _userId = '';
   final AudioPlayer _audioPlayer = AudioPlayer(); // Ses önizleme için
 
   @override
+  bool get wantKeepAlive => true; // State'i koru
+
+  @override
   void initState() {
     super.initState();
-    _loadSettings();
+    // PhoneHome'dan gelen SettingsModel'i kullan
+    _settings = widget.settings;
+    // Sadece User ID'yi asenkron yükle
     _loadUserId();
   }
 
@@ -38,18 +51,13 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  Future<void> _loadSettings() async {
-    await _settings.loadSettings();
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
   Future<void> _loadUserId() async {
     final userId = await getOrCreateUserId();
-    setState(() {
-      _userId = userId;
-    });
+    if (mounted) {
+      setState(() {
+        _userId = userId;
+      });
+    }
   }
 
   Future<void> _toggleLanguage() async {
@@ -66,14 +74,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    super.build(context); // AutomaticKeepAliveClientMixin için gerekli
 
     return Container(
       decoration: BoxDecoration(
         image: DecorationImage(
-          image: AssetImage('assets/wallpaper/${_settings.currentWallpaper}'),
+          // Arka planı PhoneHome'dan gelen duvar kağıdıyla senkron tut
+          image: AssetImage('assets/wallpaper/${widget.wallpaper}'),
           fit: BoxFit.cover,
         ),
       ),
@@ -117,16 +124,24 @@ class _SettingsPageState extends State<SettingsPage> {
               _buildAlarmSoundSection(),
               const SizedBox(height: 20),
 
+              // Pomodoro Duration Section
+              _buildPomodoroDurationSection(),
+              const SizedBox(height: 20),
+
+              // Break Duration Section
+              _buildBreakDurationSection(),
+              const SizedBox(height: 20),
+
               // Wallpaper Section
               _buildWallpaperSection(),
-              
+
               const SizedBox(height: 20),
 
               // Privacy Policy Section (en altta)
               _buildSettingCard(
                 icon: Icons.privacy_tip,
-                title: _settings.currentLanguage == 'en' 
-                    ? 'Privacy Policy' 
+                title: _settings.currentLanguage == 'en'
+                    ? 'Privacy Policy'
                     : 'Gizlilik Politikası',
                 subtitle: _settings.currentLanguage == 'en'
                     ? 'How we use your data'
@@ -192,8 +207,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildUserIdCard() {
     final isEnglish = _settings.currentLanguage == 'en';
-    final shortId = _userId.length > 8 ? '${_userId.substring(0, 8)}...' : _userId;
-    
+    final shortId = _userId.length > 8
+        ? '${_userId.substring(0, 8)}...'
+        : _userId;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.3),
@@ -251,7 +268,11 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             Row(
               children: [
-                const Icon(Icons.notifications_active, color: Colors.white, size: 28),
+                const Icon(
+                  Icons.notifications_active,
+                  color: Colors.white,
+                  size: 28,
+                ),
                 const SizedBox(width: 12),
                 Text(
                   _settings.getText('alarm_sound'),
@@ -264,23 +285,23 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
             const SizedBox(height: 16),
-            
+
             // Alarm sound list
             ...(_settings.availableAlarmSounds.map((sound) {
               final soundId = sound['id']!;
               final soundName = sound['name']!;
               final isSelected = soundId == _settings.currentAlarmSound;
-              
+
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
-                  color: isSelected 
-                      ? Colors.white.withValues(alpha: 0.2) 
+                  color: isSelected
+                      ? Colors.white.withValues(alpha: 0.2)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: isSelected 
-                        ? Colors.white 
+                    color: isSelected
+                        ? Colors.white
                         : Colors.white.withValues(alpha: 0.1),
                     width: isSelected ? 2 : 1,
                   ),
@@ -292,7 +313,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                   ),
                   trailing: Row(
@@ -300,12 +323,20 @@ class _SettingsPageState extends State<SettingsPage> {
                     children: [
                       if (soundId != SettingsModel.alarmNone)
                         IconButton(
-                          icon: const Icon(Icons.play_arrow, color: Colors.white, size: 20),
+                          icon: const Icon(
+                            Icons.play_arrow,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                           onPressed: () => _previewSound(soundId),
                           tooltip: 'Preview',
                         ),
                       if (isSelected)
-                        const Icon(Icons.check_circle, color: Colors.white, size: 24),
+                        const Icon(
+                          Icons.check_circle,
+                          color: Colors.white,
+                          size: 24,
+                        ),
                     ],
                   ),
                   onTap: () => _changeAlarmSound(soundId),
@@ -433,6 +464,136 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPomodoroDurationSection() {
+    final List<int> availableMinutes = [15, 20, 25, 30, 45, 60];
+
+    return _buildSettingCard(
+      icon: Icons.timer,
+      title: _settings.getText('pomodoro'),
+      subtitle:
+          '${_settings.selectedMinutes} ${_settings.currentLanguage == 'tr' ? 'dk' : 'min'}',
+      onTap: () {
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: Colors.transparent,
+          builder: (context) => Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[900]!,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _settings.getText('pomodoro'),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ...availableMinutes.map((minutes) {
+                  final isSelected = minutes == _settings.selectedMinutes;
+                  return ListTile(
+                    title: Text(
+                      '$minutes ${_settings.currentLanguage == 'tr' ? 'dk' : 'min'}',
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white70,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    trailing: isSelected
+                        ? const Icon(Icons.check, color: Colors.white)
+                        : null,
+                    onTap: () async {
+                      await _settings.setSelectedMinutes(minutes);
+                      if (!mounted || !context.mounted) return;
+                      setState(() {});
+                      if (!mounted || !context.mounted) return;
+                      Navigator.pop(context);
+                    },
+                  );
+                }),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBreakDurationSection() {
+    final List<int> availableBreakMinutes = [3, 5, 10, 15];
+
+    return _buildSettingCard(
+      icon: Icons.coffee,
+      title: _settings.getText('break_time'),
+      subtitle:
+          '${_settings.breakMinutes} ${_settings.currentLanguage == 'tr' ? 'dk' : 'min'}',
+      onTap: () {
+        showModalBottomSheet(
+          context: context,
+          backgroundColor: Colors.transparent,
+          builder: (context) => Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[900]!,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
+            ),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _settings.getText('break_time'),
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ...availableBreakMinutes.map((minutes) {
+                  final isSelected = minutes == _settings.breakMinutes;
+                  return ListTile(
+                    title: Text(
+                      '$minutes ${_settings.currentLanguage == 'tr' ? 'dk' : 'min'}',
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white70,
+                        fontWeight: isSelected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    trailing: isSelected
+                        ? const Icon(Icons.check, color: Colors.white)
+                        : null,
+                    onTap: () async {
+                      await _settings.setBreakMinutes(minutes);
+                      if (!mounted || !context.mounted) return;
+                      setState(() {});
+                      if (!mounted || !context.mounted) return;
+                      Navigator.pop(context);
+                    },
+                  );
+                }),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

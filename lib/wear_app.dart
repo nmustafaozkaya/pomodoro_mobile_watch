@@ -5,7 +5,6 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
 import 'package:vibration/vibration.dart';
-import 'api_client.dart';
 import 'user_id_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -18,8 +17,7 @@ class WearApp extends StatefulWidget {
 
 class WearAppState extends State<WearApp> {
   static const platform = MethodChannel('com.pomodoro.wear/data');
-  static const String _apiBaseUrl = 'http://52.59.192.113:4001/api';
-  ApiClient? _apiClient;
+  static const statsChannel = EventChannel('com.pomodoro.wear/stats');
   String? _userId;
 
   int _secondsRemaining = 1500; // 25 minutes default
@@ -37,8 +35,7 @@ class WearAppState extends State<WearApp> {
   // Scroll controller for settings page
   final ScrollController _settingsScrollController = ScrollController();
 
-  // Store pending data to send to phone
-  Map<String, dynamic>? _pendingData;
+  StreamSubscription<dynamic>? _statsSubscription;
 
   // Dil kontrolü - Cihaz diline göre (Türkçe ise TR, değilse EN)
   bool get _isTurkish {
@@ -56,18 +53,11 @@ class WearAppState extends State<WearApp> {
     // Delay the platform call to avoid startup issues
     Future.delayed(const Duration(milliseconds: 500), () {
       _loadInitialFromPhone();
+      _requestTotalFromPhone(); // İlk açılışta telefondaki toplamı al
     });
 
-    // Try to send pending data periodically (only if not disposed)
-    // Her 5 dakikada bir cloud sync - maliyeti düşürmek için
-    Timer.periodic(const Duration(minutes: 5), (timer) {
-      if (mounted) {
-        _trySendPendingData();
-        _refreshCloudTotals();
-      } else {
-        timer.cancel();
-      }
-    });
+    // Telefondaki toplam istatistiği dinle
+    _startListeningToPhoneStats();
   }
 
   Future<void> _initializeUserId() async {
@@ -87,17 +77,13 @@ class WearAppState extends State<WearApp> {
       // Platform channel hatası, kendi ID'sini oluştur
       _userId = await getOrCreateUserId();
     }
-
-    _apiClient = ApiClient(baseUrl: _apiBaseUrl, userId: _userId!);
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     _settingsScrollController.dispose();
+    _statsSubscription?.cancel();
     super.dispose();
   }
 
@@ -153,42 +139,17 @@ class WearAppState extends State<WearApp> {
   }
 
   void _resetTimer() {
+    if (!mounted) return;
     _timer?.cancel();
-    // Capture worked minutes BEFORE resetting (round up)
-    final workedBeforeReset = ((_originalTime - _secondsRemaining) + 59) ~/ 60;
 
-    // Update local stats so statistics page reflects immediately
-    if (workedBeforeReset > 0) {
+    // Reset timer state
+    if (mounted) {
       setState(() {
-        _totalWorkMinutes += workedBeforeReset;
+        _isRunning = false;
+        _isPaused = false;
+        _secondsRemaining = _originalTime;
       });
     }
-
-    // Send to phone with reset flag and actual worked minutes
-    _pendingData = {
-      'totalWorkMinutes': workedBeforeReset,
-      'isCompleted': false,
-      'isReset': true,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-    _trySendPendingData();
-
-    // Also post to cloud (fire-and-forget)
-    if (workedBeforeReset > 0 && _apiClient != null) {
-      // ignore: discarded_futures
-      _apiClient!.postSession(
-        source: 'watch',
-        minutes: workedBeforeReset,
-        timestampMs: DateTime.now().millisecondsSinceEpoch,
-      );
-    }
-
-    // Finally reset timer state
-    setState(() {
-      _isRunning = false;
-      _isPaused = false;
-      _secondsRemaining = _originalTime;
-    });
   }
 
   Future<void> _loadInitialFromPhone() async {
@@ -264,68 +225,86 @@ class WearAppState extends State<WearApp> {
   }
 
   void _sendDataToPhone() {
-    // Only store data when timer is completed or reset (not on pause)
-    if (_secondsRemaining == 0 || (!_isRunning && !_isPaused)) {
+    if (!mounted) return;
+    // Only send when timer is completed (not on pause or reset)
+    if (_secondsRemaining == 0) {
       final workedSeconds = _originalTime - _secondsRemaining;
       final workedMinutes =
           (workedSeconds + 59) ~/ 60; // round up to next minute
-      _pendingData = {
-        'totalWorkMinutes': workedMinutes,
-        'isCompleted': _secondsRemaining == 0,
-        'isReset':
-            (!_isRunning && !_isPaused && _secondsRemaining == _originalTime),
+
+      if (workedMinutes <= 0) return;
+
+      // Sadece telefona gönder - telefon hesaplasın
+      final sessionData = {
+        'minutes': workedMinutes,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
 
-      // Update local statistics immediately for watch UI
-      if (workedMinutes > 0 && _secondsRemaining == 0) {
-        setState(() {
-          _totalWorkMinutes += workedMinutes;
-        });
-      }
-
-      // Try to send immediately, but don't wait for result
-      _trySendPendingData();
-
-      // Also post to cloud (fire-and-forget)
-      if (workedMinutes > 0 && _secondsRemaining == 0 && _apiClient != null) {
-        // ignore: discarded_futures
-        _apiClient!.postSession(
-          source: 'watch',
-          minutes: workedMinutes,
-          timestampMs: DateTime.now().millisecondsSinceEpoch,
-        );
-      }
+      // Telefona gönder
+      platform
+          .invokeMethod('sendSession', sessionData)
+          .then((_) {
+            // Başarılı - telefon yeni toplamı gönderecek
+            _requestTotalFromPhone(); // Güncel toplamı al
+          })
+          .catchError((e) {
+            // Hata - sorun yok, telefon bağlı değil
+          });
     }
   }
 
-  Future<void> _refreshCloudTotals() async {
-    if (_apiClient == null) return;
+  // Telefondaki toplam istatistiği dinle
+  void _startListeningToPhoneStats() {
+    _statsSubscription = statsChannel.receiveBroadcastStream().listen(
+      (dynamic event) {
+        if (!mounted) return;
+        final totalMinutes = event as int? ?? 0;
+        setState(() {
+          _totalWorkMinutes = totalMinutes;
+        });
+      },
+      onError: (error) {
+        // Hataları sessizce yok say
+      },
+    );
+  }
+
+  // Telefona "toplam ne kadar?" diye sor
+  Future<void> _requestTotalFromPhone() async {
     try {
-      final total = await _apiClient!.fetchTotalMinutes();
+      final int total = await platform.invokeMethod('getTotalMinutes');
       if (mounted) {
         setState(() {
           _totalWorkMinutes = total;
         });
       }
     } catch (_) {
-      // ignore errors silently
+      // Telefon bağlı değil, sorun yok
     }
   }
 
-  Future<void> _trySendPendingData() async {
-    if (_pendingData == null) return;
-
-    try {
-      await platform.invokeMethod('sendWorkData', _pendingData);
-      // Success - clear pending data
-      _pendingData = null;
-    } on PlatformException {
-      // Keep data pending for next attempt
-      // This is normal when phone is not connected
-    } catch (e) {
-      // Handle any other exceptions silently
-      // Keep data pending for next attempt
+  // İstatistik sayfasında refresh butonu için
+  Future<void> _refreshStats(BuildContext context) async {
+    await _requestTotalFromPhone();
+    if (mounted && context.mounted) {
+      // Küçük ve ortada mesaj göster
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t('Refreshed', 'Yenilendi'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12),
+          ),
+          duration: const Duration(seconds: 1),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.symmetric(horizontal: 60, vertical: 100),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30), // Daire gibi yuvarlak
+          ),
+        ),
+      );
     }
   }
 
@@ -371,10 +350,16 @@ class WearAppState extends State<WearApp> {
             },
             child: PageView(
               controller: _pageController,
-              onPageChanged: (index) => setState(() => _currentPage = index),
+              onPageChanged: (index) {
+                setState(() => _currentPage = index);
+                // İstatistikler sayfasına gelince refresh yap
+                if (index == 1) {
+                  _requestTotalFromPhone();
+                }
+              },
               children: [
                 _buildTimerPage(),
-                _buildStatisticsPage(),
+                Builder(builder: (context) => _buildStatisticsPage(context)),
                 _buildSettingsPage(),
               ],
             ),
@@ -391,7 +376,23 @@ class WearAppState extends State<WearApp> {
 
     return Stack(
       children: [
-        // Süre yazısı - EN ÜSTTE
+        // Süre seçmek için bilgi yazısı - SÜRENİN ÜSTÜNDE
+        Positioned(
+          top: 45,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(
+              child: Text(
+                _t("Swipe right for duration", "Süre için sağa kaydır"),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 10, color: Colors.white60),
+              ),
+            ),
+          ),
+        ),
+
+        // Süre yazısı - ORTADA
         Positioned(
           top: 60,
           left: 0,
@@ -436,7 +437,11 @@ class WearAppState extends State<WearApp> {
                     Column(
                       children: [
                         GestureDetector(
-                          onTap: _startTimer,
+                          behavior:
+                              HitTestBehavior.opaque, // Tıklamayı garanti et
+                          onTap: () {
+                            _startTimer();
+                          },
                           child: Container(
                             width: 46,
                             height: 46,
@@ -465,7 +470,11 @@ class WearAppState extends State<WearApp> {
                     Column(
                       children: [
                         GestureDetector(
-                          onTap: _resetTimer,
+                          behavior:
+                              HitTestBehavior.opaque, // Tıklamayı garanti et
+                          onTap: () {
+                            _resetTimer();
+                          },
                           child: Container(
                             width: 46,
                             height: 46,
@@ -495,7 +504,10 @@ class WearAppState extends State<WearApp> {
               : Column(
                   children: [
                     GestureDetector(
-                      onTap: _startTimer,
+                      behavior: HitTestBehavior.opaque, // Tıklamayı garanti et
+                      onTap: () {
+                        _startTimer();
+                      },
                       child: Container(
                         width: 46,
                         height: 46,
@@ -523,24 +535,11 @@ class WearAppState extends State<WearApp> {
                   ],
                 ),
         ),
-
-        // Süre seçmek için bilgi yazısı - EN ALTTA
-        Positioned(
-          top: 50,
-          bottom: 0,
-          left: 0,
-          right: 0,
-          child: Text(
-            _t("Swipe right for duration", "Süre için sağa kaydır"),
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 10, color: Colors.white60),
-          ),
-        ),
       ],
     );
   }
 
-  Widget _buildStatisticsPage() {
+  Widget _buildStatisticsPage(BuildContext context) {
     return Stack(
       children: [
         // Merkez içerik - İstatistikler
@@ -569,6 +568,35 @@ class WearAppState extends State<WearApp> {
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
               const SizedBox(height: 16),
+
+              // Refresh butonu
+              GestureDetector(
+                onTap: () => _refreshStats(context),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.deepPurple,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.refresh, color: Colors.white, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        _t('Refresh', 'Yenile'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),

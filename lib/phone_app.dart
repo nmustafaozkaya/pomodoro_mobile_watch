@@ -16,6 +16,15 @@ class PhoneApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Google Fonts yükleme hatası durumunda varsayılan font kullan
+    TextTheme textTheme;
+    try {
+      textTheme = GoogleFonts.robotoTextTheme();
+    } catch (e) {
+      // Font yüklenemezse varsayılan font kullan
+      textTheme = ThemeData.light().textTheme;
+    }
+    
     return MaterialApp(
       title: 'Pomodoro Timer',
       theme: ThemeData(
@@ -24,7 +33,7 @@ class PhoneApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        textTheme: GoogleFonts.robotoTextTheme(),
+        textTheme: textTheme,
         scaffoldBackgroundColor: Colors.white, // Splash ile uyumlu
       ),
       home: const PhoneHome(),
@@ -62,15 +71,17 @@ class _PhoneHomeState extends State<PhoneHome> {
     _statistics = StatisticsModel();
     _initializeUserId();
     _loadSettings();
-    _preloadWallpaper(); // Wallpaper'ı önceden yükle
+    // Context hazır olduktan sonra wallpaper'ı yükle
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _preloadWallpaper();
+      }
+    });
   }
 
   Future<void> _initializeUserId() async {
     _userId = await getOrCreateUserId();
-    _apiClient = ApiClient(
-      baseUrl: _apiBaseUrl,
-      userId: _userId!,
-    );
+    _apiClient = ApiClient(baseUrl: _apiBaseUrl, userId: _userId!);
     if (mounted) {
       setState(() {});
       _startWearDataSync();
@@ -81,7 +92,7 @@ class _PhoneHomeState extends State<PhoneHome> {
     try {
       await _settings.loadSettings();
       await _statistics.loadStatistics();
-      
+
       final newWallpaper = _settings.currentWallpaper;
       if (newWallpaper != _currentWallpaper) {
         // Wallpaper değişmiş, yeniden yükle
@@ -105,18 +116,22 @@ class _PhoneHomeState extends State<PhoneHome> {
 
   // Wallpaper'ı önceden yükle (görsel olmadan ekran gösterme)
   Future<void> _preloadWallpaper() async {
+    if (!mounted) return;
     try {
       // Mevcut wallpaper'ı yükle
       final image = AssetImage('assets/wallpaper/$_currentWallpaper');
-      await precacheImage(image, context);
-      
+      final context = this.context;
+      if (context.mounted) {
+        await precacheImage(image, context);
+      }
+
       if (mounted) {
         setState(() {
           _isWallpaperLoaded = true;
         });
       }
     } catch (e) {
-      // Hata durumunda yine de devam et
+      // Hata durumunda yine de devam et (wallpaper yüklenemese bile uygulama çalışsın)
       if (mounted) {
         setState(() {
           _isWallpaperLoaded = true;
@@ -131,7 +146,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         _currentWallpaper = wallpaper;
         _isWallpaperLoaded = false; // Yeni wallpaper yüklenecek
       });
-      
+
       // Yeni wallpaper'ı yükle
       await _preloadWallpaper();
     }
@@ -165,6 +180,9 @@ class _PhoneHomeState extends State<PhoneHome> {
         );
       case 2:
         return SettingsPage(
+          key: const ValueKey('settings_page'), // State'i korumak için key
+          settings: _settings, // Aynı SettingsModel'i paylaş
+          wallpaper: _currentWallpaper, // Mevcut duvar kağıdı ile aç
           onWallpaperChanged: _onWallpaperChanged,
           onLanguageChanged: _onLanguageChanged,
         );
@@ -202,6 +220,9 @@ class _PhoneHomeState extends State<PhoneHome> {
   }
 
   void _startWearDataSync() {
+    // İlk senkronizasyonu hemen yap
+    _syncCloudStats();
+
     // Her 3 dakikada bir cloud sync - maliyeti düşürmek için
     _syncTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
       if (!mounted) {
@@ -259,18 +280,24 @@ class _PhoneHomeState extends State<PhoneHome> {
 
   @override
   Widget build(BuildContext context) {
-    // Wallpaper yüklenene kadar loading göster
-    if (!_isWallpaperLoaded) {
+    // İlk build'de wallpaper yüklenene kadar loading göster
+    // Ama context hazır değilse direkt içeriği göster (crash önleme)
+    if (!_isWallpaperLoaded && _currentWallpaper.isNotEmpty) {
+      // Context hazır olduğunda wallpaper'ı yükle
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isWallpaperLoaded) {
+          _preloadWallpaper();
+        }
+      });
+      // Loading göster ama çok kısa süre (max 500ms)
       return Scaffold(
         backgroundColor: Colors.white,
         body: Center(
-          child: CircularProgressIndicator(
-            color: Colors.deepPurple,
-          ),
+          child: CircularProgressIndicator(color: Colors.deepPurple),
         ),
       );
     }
-    
+
     return Scaffold(
       backgroundColor: Colors.white, // Splash ile uyumlu
       extendBodyBehindAppBar: true,
@@ -352,6 +379,9 @@ class _TimerPageState extends State<_TimerPage>
   Timer? _timer;
   int _secondsRemaining = 25 * 60; // 25 dakika
   int _selectedMinutes = 25; // Seçilen dakika
+  int _breakMinutes = 5; // Ara süresi (dakika)
+  int _breakSecondsRemaining = 300; // 5 dakika = 300 saniye
+  bool _isBreakTime = false; // Pomodoro mu ara mı?
   bool _isRunning = false;
   bool _isPaused = false;
   bool _showTimeSelector = false;
@@ -369,6 +399,8 @@ class _TimerPageState extends State<_TimerPage>
     // Kaydedilmiş timer dakikasını yükle
     _selectedMinutes = widget.settings.selectedMinutes;
     _secondsRemaining = _selectedMinutes * 60;
+    _breakMinutes = widget.settings.breakMinutes;
+    _breakSecondsRemaining = _breakMinutes * 60;
     // Scroll controller'ı daha yüksek initial offset ile başlat
     _scrollController = ScrollController(
       initialScrollOffset: 0.0, // En üstten başla
@@ -402,11 +434,17 @@ class _TimerPageState extends State<_TimerPage>
     super.didUpdateWidget(oldWidget);
     // Widget güncellendiğinde (sekmeler arası geçişte) kaydedilmiş değeri kontrol et
     final savedMinutes = widget.settings.selectedMinutes;
-    if (savedMinutes != _selectedMinutes && !_isRunning && !_isPaused) {
+    final savedBreakMinutes = widget.settings.breakMinutes;
+    if ((savedMinutes != _selectedMinutes ||
+            savedBreakMinutes != _breakMinutes) &&
+        !_isRunning &&
+        !_isPaused) {
       // Timer çalışmıyorsa kaydedilmiş değere güncelle
       setState(() {
         _selectedMinutes = savedMinutes;
         _secondsRemaining = savedMinutes * 60;
+        _breakMinutes = savedBreakMinutes;
+        _breakSecondsRemaining = savedBreakMinutes * 60;
       });
     }
   }
@@ -425,7 +463,7 @@ class _TimerPageState extends State<_TimerPage>
     try {
       // Kullanıcının seçtiği alarm sesini çal
       final soundPath = widget.settings.getAlarmSoundPath();
-      
+
       if (soundPath != null) {
         // Alarm sesini 1 kez çal (loop yok) ve 5 saniye sonra durdur
         await _audioPlayer.stop(); // Önce durdur (eğer çalıyorsa)
@@ -433,13 +471,13 @@ class _TimerPageState extends State<_TimerPage>
           AssetSource(soundPath),
           mode: PlayerMode.mediaPlayer, // Loop yok
         );
-        
+
         // 5 saniye sonra alarm sesini durdur
         Future.delayed(const Duration(seconds: 5), () {
           _audioPlayer.stop();
         });
       }
-      
+
       // Titreşim (her zaman çalışır, ses olsa da olmasa da)
       final hasVibrator = await Vibration.hasVibrator();
       if (hasVibrator) {
@@ -484,27 +522,60 @@ class _TimerPageState extends State<_TimerPage>
         return;
       }
       setState(() {
-        if (_secondsRemaining > 0) {
-          _secondsRemaining--;
+        if (_isBreakTime) {
+          // Ara zamanı
+          if (_breakSecondsRemaining > 0) {
+            _breakSecondsRemaining--;
+          } else {
+            // Ara bitti - kullanıcıya seçenek sun
+            _timer?.cancel();
+            _isRunning = false;
+            _isPaused = false;
+            _playAlarmAndVibrate();
+            // Pomodoro'ya geç ama başlatma
+            _isBreakTime = false;
+            _secondsRemaining = _selectedMinutes * 60;
+            _sessionStartSeconds = 0;
+          }
         } else {
-          _timer?.cancel();
-          _isRunning = false;
-          _isPaused = false;
+          // Pomodoro zamanı
+          if (_secondsRemaining > 0) {
+            _secondsRemaining--;
+          } else {
+            _timer?.cancel();
+            _isRunning = false;
+            _isPaused = false;
 
-          // Timer tamamlandığında alarm çal ve titre
-          _playAlarmAndVibrate();
+            // Timer tamamlandığında alarm çal ve titre
+            _playAlarmAndVibrate();
 
-          // İstatistikleri kaydet
-          _recordCompletedSession();
+            // İstatistikleri kaydet
+            _recordCompletedSession();
 
-          _secondsRemaining =
-              _selectedMinutes * 60; // Reset to selected minutes
-          _sessionStartSeconds = 0; // Session bitti, sıfırla
-          
-          // Parent'a timer durduğunu bildir
-          widget.onTimerStateChanged(false);
+            _sessionStartSeconds = 0; // Session bitti, sıfırla
+
+            // Ara'ya geç ama başlatma - kullanıcıya seçenek sun
+            _isBreakTime = true;
+            _breakSecondsRemaining = _breakMinutes * 60;
+          }
         }
       });
+    });
+  }
+
+  void _skipToNext() {
+    // Bir sonraki aşamaya geç (pomodoro <-> ara) ama timer başlatma
+    setState(() {
+      if (_isBreakTime) {
+        // Ara'dan Pomodoro'ya geç
+        _isBreakTime = false;
+        _secondsRemaining = _selectedMinutes * 60;
+        _sessionStartSeconds = _secondsRemaining;
+      } else {
+        // Pomodoro'dan Ara'ya geç
+        _isBreakTime = true;
+        _breakSecondsRemaining = _breakMinutes * 60;
+      }
     });
   }
 
@@ -539,7 +610,9 @@ class _TimerPageState extends State<_TimerPage>
       setState(() {
         _isRunning = false;
         _isPaused = false;
+        _isBreakTime = false;
         _secondsRemaining = _selectedMinutes * 60;
+        _breakSecondsRemaining = _breakMinutes * 60;
         _sessionStartSeconds = 0; // Session sıfırlandı
       });
       // Parent'a timer durduğunu bildir (reset)
@@ -555,7 +628,7 @@ class _TimerPageState extends State<_TimerPage>
       if (sessionMinutes > 0) {
         // 1. Önce lokal'e kaydet (offline çalışma için)
         await widget.statistics.recordSession(sessionMinutes);
-        
+
         // 2. Sonra cloud'a gönder (senkronizasyon için)
         // ignore: discarded_futures
         widget.apiClient.postSession(
@@ -572,7 +645,7 @@ class _TimerPageState extends State<_TimerPage>
   Future<void> _recordPartialSession(int workedMinutes) async {
     // 1. Önce lokal'e kaydet (offline çalışma için)
     await widget.statistics.recordSession(workedMinutes);
-    
+
     // 2. Sonra cloud'a gönder (senkronizasyon için)
     // ignore: discarded_futures
     widget.apiClient.postSession(
@@ -723,28 +796,45 @@ class _TimerPageState extends State<_TimerPage>
   }
 
   double _getProgress() {
-    return 1.0 - (_secondsRemaining / (_selectedMinutes * 60));
+    if (_isBreakTime) {
+      final totalBreakSeconds = _breakMinutes * 60;
+      return 1.0 - (_breakSecondsRemaining / totalBreakSeconds);
+    } else {
+      return 1.0 - (_secondsRemaining / (_selectedMinutes * 60));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context); // AutomaticKeepAliveClientMixin için gerekli
-    
+
     // Build sırasında kaydedilmiş değeri kontrol et (timer çalışmıyorsa)
     if (!_isRunning && !_isPaused) {
       final savedMinutes = widget.settings.selectedMinutes;
-      if (savedMinutes != _selectedMinutes) {
+      final savedBreakMinutes = widget.settings.breakMinutes;
+      if ((savedMinutes != _selectedMinutes ||
+              savedBreakMinutes != _breakMinutes) &&
+          !_isRunning &&
+          !_isPaused) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             setState(() {
               _selectedMinutes = savedMinutes;
               _secondsRemaining = savedMinutes * 60;
+              _breakMinutes = savedBreakMinutes;
+              _breakSecondsRemaining = savedBreakMinutes * 60;
             });
           }
         });
       }
     }
-    
+
+    // Timer durumu hesaplamaları
+    final currentSeconds = _isBreakTime
+        ? _breakSecondsRemaining
+        : _secondsRemaining;
+    final isTimerFinished = currentSeconds == 0 && !_isRunning && !_isPaused;
+
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
@@ -793,7 +883,21 @@ class _TimerPageState extends State<_TimerPage>
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
-                                      _formatTime(_secondsRemaining),
+                                      _isBreakTime
+                                          ? widget.settings.getText('break')
+                                          : widget.settings.getText('pomodoro'),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _formatTime(
+                                        _isBreakTime
+                                            ? _breakSecondsRemaining
+                                            : _secondsRemaining,
+                                      ),
                                       style: const TextStyle(
                                         fontSize: 48,
                                         fontWeight: FontWeight.bold,
@@ -851,6 +955,48 @@ class _TimerPageState extends State<_TimerPage>
                         label: Text(widget.settings.getText('reset')),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else if (isTimerFinished) ...[
+                  // Two buttons when timer finished
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Start button
+                      ElevatedButton.icon(
+                        onPressed: _startTimer,
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text(widget.settings.getText('start')),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Skip button
+                      ElevatedButton.icon(
+                        onPressed: _skipToNext,
+                        icon: const Icon(Icons.skip_next),
+                        label: Text(widget.settings.getText('skip')),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 24,
