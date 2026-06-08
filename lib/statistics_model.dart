@@ -4,10 +4,17 @@ class StatisticsModel {
   static const String _dailyKey = 'daily_stats';
   static const String _monthlyKey = 'monthly_stats';
   static const String _yearlyKey = 'yearly_stats';
+  /// Saatten (Data Layer) gelen dakikalar — istatistik ekranında "Saat" kartı için.
+  static const String _watchDailyKey = 'watch_daily_stats';
+  static const String _watchMonthlyKey = 'watch_monthly_stats';
+  static const String _watchYearlyKey = 'watch_yearly_stats';
 
   Map<String, int> _dailyStats = {};
   Map<String, int> _monthlyStats = {};
   Map<String, int> _yearlyStats = {};
+  Map<String, int> _watchDailyStats = {};
+  Map<String, int> _watchMonthlyStats = {};
+  Map<String, int> _watchYearlyStats = {};
 
   // Load all statistics from SharedPreferences
   Future<void> loadStatistics() async {
@@ -24,6 +31,10 @@ class StatisticsModel {
     // Load yearly stats
     final yearlyString = prefs.getString(_yearlyKey) ?? '{}';
     _yearlyStats = _parseStats(yearlyString);
+
+    _watchDailyStats = _parseStats(prefs.getString(_watchDailyKey) ?? '{}');
+    _watchMonthlyStats = _parseStats(prefs.getString(_watchMonthlyKey) ?? '{}');
+    _watchYearlyStats = _parseStats(prefs.getString(_watchYearlyKey) ?? '{}');
   }
 
   // Parse statistics from JSON-like string
@@ -81,6 +92,57 @@ class StatisticsModel {
     await _saveStats(_dailyKey, _dailyStats);
     await _saveStats(_monthlyKey, _monthlyStats);
     await _saveStats(_yearlyKey, _yearlyStats);
+  }
+
+  /// Saatten gelen oturum: toplam istatistiklere + ayrı saat haritasına yazar.
+  Future<void> recordWatchSession(int durationMinutes) async {
+    if (durationMinutes <= 0) return;
+    await loadStatistics();
+
+    final now = DateTime.now();
+    final dateKey = _formatDate(now);
+    final monthKey = _formatMonth(now);
+    final yearKey = _formatYear(now);
+
+    _dailyStats[dateKey] = (_dailyStats[dateKey] ?? 0) + durationMinutes;
+    _monthlyStats[monthKey] = (_monthlyStats[monthKey] ?? 0) + durationMinutes;
+    _yearlyStats[yearKey] = (_yearlyStats[yearKey] ?? 0) + durationMinutes;
+
+    _watchDailyStats[dateKey] = (_watchDailyStats[dateKey] ?? 0) + durationMinutes;
+    _watchMonthlyStats[monthKey] = (_watchMonthlyStats[monthKey] ?? 0) + durationMinutes;
+    _watchYearlyStats[yearKey] = (_watchYearlyStats[yearKey] ?? 0) + durationMinutes;
+
+    await _saveStats(_dailyKey, _dailyStats);
+    await _saveStats(_monthlyKey, _monthlyStats);
+    await _saveStats(_yearlyKey, _yearlyStats);
+    await _saveStats(_watchDailyKey, _watchDailyStats);
+    await _saveStats(_watchMonthlyKey, _watchMonthlyStats);
+    await _saveStats(_watchYearlyKey, _watchYearlyStats);
+  }
+
+  int getWatchTodayMinutes() {
+    final today = _formatDate(DateTime.now());
+    return _watchDailyStats[today] ?? 0;
+  }
+
+  /// Telefonda tamamlanan dakikalar (toplam − saatten kayıtlı).
+  int getPhoneTodayMinutes() {
+    final combined = getTodayMinutes();
+    final watch = getWatchTodayMinutes();
+    final phone = combined - watch;
+    return phone < 0 ? 0 : phone;
+  }
+
+  int getWatchThisMonthMinutes() {
+    final thisMonth = _formatMonth(DateTime.now());
+    return _watchMonthlyStats[thisMonth] ?? 0;
+  }
+
+  int getPhoneThisMonthMinutes() {
+    final combined = getThisMonthMinutes();
+    final watch = getWatchThisMonthMinutes();
+    final phone = combined - watch;
+    return phone < 0 ? 0 : phone;
   }
 
   // Format date as YYYY-MM-DD
@@ -176,29 +238,45 @@ class StatisticsModel {
     return dateKey;
   }
 
-  // Format month for display
-  String formatMonthForDisplay(String monthKey) {
+  // Format month for display (TR / EN month names)
+  String formatMonthForDisplay(String monthKey, {String language = 'tr'}) {
     final parts = monthKey.split('-');
-    if (parts.length == 2) {
-      final month = int.tryParse(parts[1]) ?? 0;
-      final monthNames = [
-        '',
-        'Ocak',
-        'Şubat',
-        'Mart',
-        'Nisan',
-        'Mayıs',
-        'Haziran',
-        'Temmuz',
-        'Ağustos',
-        'Eylül',
-        'Ekim',
-        'Kasım',
-        'Aralık',
-      ];
-      return '${monthNames[month]} ${parts[0]}';
-    }
-    return monthKey;
+    if (parts.length != 2) return monthKey;
+    final month = int.tryParse(parts[1]) ?? 0;
+    if (month < 1 || month > 12) return monthKey;
+
+    const trNames = [
+      '',
+      'Ocak',
+      'Şubat',
+      'Mart',
+      'Nisan',
+      'Mayıs',
+      'Haziran',
+      'Temmuz',
+      'Ağustos',
+      'Eylül',
+      'Ekim',
+      'Kasım',
+      'Aralık',
+    ];
+    const enNames = [
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    final names = language == 'tr' ? trNames : enNames;
+    return '${names[month]} ${parts[0]}';
   }
 
   // Format year for display
@@ -211,10 +289,16 @@ class StatisticsModel {
     _dailyStats.clear();
     _monthlyStats.clear();
     _yearlyStats.clear();
+    _watchDailyStats.clear();
+    _watchMonthlyStats.clear();
+    _watchYearlyStats.clear();
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_dailyKey);
     await prefs.remove(_monthlyKey);
     await prefs.remove(_yearlyKey);
+    await prefs.remove(_watchDailyKey);
+    await prefs.remove(_watchMonthlyKey);
+    await prefs.remove(_watchYearlyKey);
   }
 }

@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'settings_model.dart';
 import 'privacy_policy_page.dart';
-import 'user_id_helper.dart';
+import 'phone_wear_bridge.dart';
 
 class SettingsPage extends StatefulWidget {
   /// Dışarıdan hazır gelen ayarlar modeli (PhoneHome'dan paylaşılır)
@@ -30,7 +29,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with AutomaticKeepAliveClientMixin {
   late final SettingsModel _settings;
-  String _userId = '';
   final AudioPlayer _audioPlayer = AudioPlayer(); // Ses önizleme için
 
   @override
@@ -39,10 +37,7 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void initState() {
     super.initState();
-    // PhoneHome'dan gelen SettingsModel'i kullan
     _settings = widget.settings;
-    // Sadece User ID'yi asenkron yükle
-    _loadUserId();
   }
 
   @override
@@ -51,13 +46,13 @@ class _SettingsPageState extends State<SettingsPage>
     super.dispose();
   }
 
-  Future<void> _loadUserId() async {
-    final userId = await getOrCreateUserId();
-    if (mounted) {
-      setState(() {
-        _userId = userId;
-      });
-    }
+  /// Telefondaki Wear Data Layer ile saate pomodoro süresi / ara / dil gönderir.
+  Future<void> _pushWearTimerIfAndroid() async {
+    await PhoneWearBridge.pushTimerSettings(
+      selectedMinutes: _settings.selectedMinutes,
+      breakMinutes: _settings.breakMinutes,
+      language: _settings.currentLanguage,
+    );
   }
 
   Future<void> _toggleLanguage() async {
@@ -106,10 +101,6 @@ class _SettingsPageState extends State<SettingsPage>
                 ],
               ),
               const SizedBox(height: 40),
-
-              // User ID Section (en üstte)
-              _buildUserIdCard(),
-              const SizedBox(height: 20),
 
               // Language Section
               _buildSettingCard(
@@ -201,55 +192,6 @@ class _SettingsPageState extends State<SettingsPage>
           size: 20,
         ),
         onTap: onTap,
-      ),
-    );
-  }
-
-  Widget _buildUserIdCard() {
-    final isEnglish = _settings.currentLanguage == 'en';
-    final shortId = _userId.length > 8
-        ? '${_userId.substring(0, 8)}...'
-        : _userId;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.3),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-      ),
-      child: ListTile(
-        leading: const Icon(Icons.fingerprint, color: Colors.white, size: 28),
-        title: Text(
-          isEnglish ? 'Your Unique ID' : 'Özel Atanan ID',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Text(
-          shortId,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.8),
-            fontSize: 14,
-            fontFamily: 'monospace',
-          ),
-        ),
-        trailing: IconButton(
-          icon: const Icon(Icons.copy, color: Colors.white, size: 20),
-          onPressed: () {
-            Clipboard.setData(ClipboardData(text: _userId));
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  isEnglish ? 'ID copied to clipboard' : 'ID panoya kopyalandı',
-                ),
-                duration: const Duration(seconds: 2),
-                backgroundColor: Colors.green,
-              ),
-            );
-          },
-        ),
       ),
     );
   }
@@ -516,6 +458,7 @@ class _SettingsPageState extends State<SettingsPage>
                         : null,
                     onTap: () async {
                       await _settings.setSelectedMinutes(minutes);
+                      await _pushWearTimerIfAndroid();
                       if (!mounted || !context.mounted) return;
                       setState(() {});
                       if (!mounted || !context.mounted) return;
@@ -581,6 +524,7 @@ class _SettingsPageState extends State<SettingsPage>
                         : null,
                     onTap: () async {
                       await _settings.setBreakMinutes(minutes);
+                      await _pushWearTimerIfAndroid();
                       if (!mounted || !context.mounted) return;
                       setState(() {});
                       if (!mounted || !context.mounted) return;

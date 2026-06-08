@@ -3,9 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'dart:convert';
 import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:vibration/vibration.dart';
-import 'user_id_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class WearApp extends StatefulWidget {
@@ -15,10 +14,12 @@ class WearApp extends StatefulWidget {
   State<WearApp> createState() => WearAppState();
 }
 
-class WearAppState extends State<WearApp> {
+class WearAppState extends State<WearApp> with WidgetsBindingObserver {
   static const platform = MethodChannel('com.pomodoro.wear/data');
   static const statsChannel = EventChannel('com.pomodoro.wear/stats');
-  String? _userId;
+  static const settingsChannel = EventChannel('com.pomodoro.wear/settings');
+  /// Wear OS taç / rotary encoder — native `dispatchGenericMotionEvent` ile beslenir.
+  static const rotaryChannel = EventChannel('com.pomodoro.wear/rotary');
 
   int _secondsRemaining = 1500; // 25 minutes default
   int _originalTime = 1500;
@@ -26,8 +27,14 @@ class WearAppState extends State<WearApp> {
   Timer? _timer;
   bool _isRunning = false;
   bool _isPaused = false;
-  int _totalWorkMinutes = 0; // local stats for watch UI
+  /// İstatistik ekranında gösterilen toplam (telefon + bu saatte biten oturumlar).
+  int _totalWorkMinutes = 0;
+  /// Telefonun Data Layer ile bildirdiği toplam (gecikmeli / 0 olabilir).
+  int _lastPhoneReportedTotal = 0;
+  /// Bu saatte tamamlanan (Bitir veya süre dolunca) dakikalar — telefon yokken de gösterilir.
+  int _watchDeviceWorkTotal = 0;
 
+  static const String _prefsWatchDeviceWork = 'wear_device_work_minutes_total';
   // Paging (Timer <-> Statistics <-> Settings)
   final PageController _pageController = PageController(initialPage: 0);
   int _currentPage = 0;
@@ -36,6 +43,11 @@ class WearAppState extends State<WearApp> {
   final ScrollController _settingsScrollController = ScrollController();
 
   StreamSubscription<dynamic>? _statsSubscription;
+  StreamSubscription<dynamic>? _settingsSubscription;
+  StreamSubscription<dynamic>? _rotarySubscription;
+
+  /// Taç hareketlerini sayfa değişimine birleştirmek için (küçük axis değerleri).
+  double _rotaryPageAccum = 0;
 
   // Dil kontrolü - Cihaz diline göre (Türkçe ise TR, değilse EN)
   bool get _isTurkish {
@@ -49,42 +61,79 @@ class WearAppState extends State<WearApp> {
   @override
   void initState() {
     super.initState();
-    _initializeUserId();
-    // Delay the platform call to avoid startup issues
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _loadInitialFromPhone();
-      _requestTotalFromPhone(); // İlk açılışta telefondaki toplamı al
+    WidgetsBinding.instance.addObserver(this);
+    _startListeningToPhoneSettings();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadWatchDeviceWorkFromPrefs();
     });
-
-    // Telefondaki toplam istatistiği dinle
+    _rotarySubscription = rotaryChannel.receiveBroadcastStream().listen(
+      (dynamic event) {
+        final axis = (event as num?)?.toDouble() ?? 0;
+        if (axis == 0 || !mounted) return;
+        _handleRotaryAxis(axis);
+      },
+      onError: (_) {},
+    );
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      await _loadWatchDeviceWorkFromPrefs();
+      _loadInitialFromPhone();
+      await _requestTotalFromPhone();
+    });
     _startListeningToPhoneStats();
   }
 
-  Future<void> _initializeUserId() async {
-    // Önce telefonun user ID'sini almaya çalış
-    try {
-      final String result = await platform.invokeMethod('getUserId');
-      if (result.isNotEmpty) {
-        _userId = result;
-        // Saat tarafında da kaydet
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('user_id', _userId!);
-      } else {
-        // Telefon bağlı değilse, kendi ID'sini oluştur veya kayıtlı olanı kullan
-        _userId = await getOrCreateUserId();
-      }
-    } catch (_) {
-      // Platform channel hatası, kendi ID'sini oluştur
-      _userId = await getOrCreateUserId();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      Future.delayed(const Duration(milliseconds: 300), () async {
+        if (!mounted) return;
+        _loadInitialFromPhone();
+        await _loadWatchDeviceWorkFromPrefs();
+        await _requestTotalFromPhone();
+      });
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _settingsScrollController.dispose();
     _statsSubscription?.cancel();
+    _settingsSubscription?.cancel();
+    _rotarySubscription?.cancel();
     super.dispose();
+  }
+
+  void _recomputeStatsDisplay() {
+    if (!mounted) return;
+    final merged = math.max(_lastPhoneReportedTotal, _watchDeviceWorkTotal);
+    setState(() {
+      _totalWorkMinutes = merged;
+    });
+  }
+
+  Future<void> _loadWatchDeviceWorkFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getInt(_prefsWatchDeviceWork) ?? 0;
+      if (!mounted) return;
+      _watchDeviceWorkTotal = v;
+      _recomputeStatsDisplay();
+    } catch (_) {}
+  }
+
+  /// Bu saatte biten pomodoro dakikası — istatistik ekranı anında güncellenir; telefona da gönderilir.
+  Future<void> _addWatchDeviceWorkMinutes(int minutes) async {
+    if (minutes <= 0 || !mounted) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final next = (prefs.getInt(_prefsWatchDeviceWork) ?? 0) + minutes;
+      await prefs.setInt(_prefsWatchDeviceWork, next);
+      if (!mounted) return;
+      _watchDeviceWorkTotal = next;
+      _recomputeStatsDisplay();
+    } catch (_) {}
   }
 
   void _startTimer() {
@@ -106,7 +155,7 @@ class WearAppState extends State<WearApp> {
             // Timer bitince alarm ve titreşim
             _playAlarmAndVibrate();
 
-            _sendDataToPhone();
+            _sendWorkSessionToPhone();
           }
         });
       });
@@ -131,66 +180,77 @@ class WearAppState extends State<WearApp> {
             _timer?.cancel();
             _isRunning = false;
             _isPaused = false;
-            _sendDataToPhone();
+            _playAlarmAndVibrate();
+            _sendWorkSessionToPhone();
           }
         });
       });
     }
   }
 
-  void _resetTimer() {
-    if (!mounted) return;
+  /// Duraklat sonrası: çalışılan dakikayı telefona gönder, süreyi başa al.
+  Future<void> _finishWorkEarly() async {
+    if (!_isPaused) return;
     _timer?.cancel();
+    await _sendWorkSessionToPhone();
+    if (!mounted) return;
+    setState(() {
+      _isRunning = false;
+      _isPaused = false;
+      _secondsRemaining = _originalTime;
+    });
+  }
 
-    // Reset timer state
-    if (mounted) {
-      setState(() {
-        _isRunning = false;
-        _isPaused = false;
-        _secondsRemaining = _originalTime;
-      });
-    }
+  Future<void> _sendWorkSessionToPhone() async {
+    if (!mounted) return;
+    final workedSeconds = _originalTime - _secondsRemaining;
+    if (workedSeconds <= 0) return;
+    final workedMinutes = (workedSeconds + 59) ~/ 60;
+    if (workedMinutes <= 0) return;
+
+    await _addWatchDeviceWorkMinutes(workedMinutes);
+
+    final sessionData = {
+      'minutes': workedMinutes,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    try {
+      await platform.invokeMethod('sendSession', sessionData);
+      await _requestTotalFromPhone();
+    } catch (_) {}
   }
 
   Future<void> _loadInitialFromPhone() async {
-    // Önce SharedPreferences'tan kayıtlı dakikayı oku
+    try {
+      final String raw =
+          await platform.invokeMethod<String>('getSettingsFromDataLayer') ??
+              '{}';
+      final Map<String, dynamic> data = _tryParseJson(raw);
+      final dynamic sm = data['selectedMinutes'];
+      final int? fromPhone = sm is int
+          ? sm
+          : (sm is num ? sm.toInt() : int.tryParse('$sm'));
+      if (fromPhone != null && fromPhone > 0) {
+        await _applyPhoneSelectedMinutes(fromPhone);
+        return;
+      }
+    } catch (_) {}
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedMinutes = prefs.getInt('selected_minutes') ?? 25;
       final durationSeconds = savedMinutes * 60;
-
+      if (!mounted) return;
       setState(() {
         _selectedMinutes = savedMinutes;
         _originalTime = durationSeconds;
         _secondsRemaining = durationSeconds;
       });
       return;
-    } catch (_) {
-      // SharedPreferences okuma hatası, platform channel'ı dene
-    }
+    } catch (_) {}
 
-    // Fallback: Platform channel'dan oku (eski yöntem)
-    try {
-      // Expect JSON string from phone, e.g. {"durationSeconds":1500,"language":"tr"}
-      final String result = await platform.invokeMethod('getInitialSettings');
-      if (result.isNotEmpty) {
-        final Map<String, dynamic> data = _tryParseJson(result);
-        final int durationSeconds = (data['durationSeconds'] is int)
-            ? data['durationSeconds'] as int
-            : 1500;
-
-        setState(() {
-          _selectedMinutes = durationSeconds ~/ 60;
-          _originalTime = durationSeconds;
-          _secondsRemaining = durationSeconds;
-        });
-        return;
-      }
-    } catch (_) {
-      // Ignore and use fallback
-    }
-
-    // Fallback defaults
+    if (!mounted) return;
     setState(() {
       _selectedMinutes = 25;
       _originalTime = 1500;
@@ -224,44 +284,14 @@ class WearAppState extends State<WearApp> {
     }
   }
 
-  void _sendDataToPhone() {
-    if (!mounted) return;
-    // Only send when timer is completed (not on pause or reset)
-    if (_secondsRemaining == 0) {
-      final workedSeconds = _originalTime - _secondsRemaining;
-      final workedMinutes =
-          (workedSeconds + 59) ~/ 60; // round up to next minute
-
-      if (workedMinutes <= 0) return;
-
-      // Sadece telefona gönder - telefon hesaplasın
-      final sessionData = {
-        'minutes': workedMinutes,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-
-      // Telefona gönder
-      platform
-          .invokeMethod('sendSession', sessionData)
-          .then((_) {
-            // Başarılı - telefon yeni toplamı gönderecek
-            _requestTotalFromPhone(); // Güncel toplamı al
-          })
-          .catchError((e) {
-            // Hata - sorun yok, telefon bağlı değil
-          });
-    }
-  }
-
   // Telefondaki toplam istatistiği dinle
   void _startListeningToPhoneStats() {
     _statsSubscription = statsChannel.receiveBroadcastStream().listen(
       (dynamic event) {
         if (!mounted) return;
-        final totalMinutes = event as int? ?? 0;
-        setState(() {
-          _totalWorkMinutes = totalMinutes;
-        });
+        final phoneT = event as int? ?? 0;
+        _lastPhoneReportedTotal = phoneT;
+        _recomputeStatsDisplay();
       },
       onError: (error) {
         // Hataları sessizce yok say
@@ -269,17 +299,42 @@ class WearAppState extends State<WearApp> {
     );
   }
 
+  /// Telefondan Data Layer ile gelen pomodoro süresi (dakika) güncellemeleri.
+  void _startListeningToPhoneSettings() {
+    _settingsSubscription =
+        settingsChannel.receiveBroadcastStream().listen((dynamic event) async {
+      if (!mounted || event is! Map) return;
+      final minutes = (event['selectedMinutes'] as num?)?.toInt();
+      if (minutes == null || minutes <= 0) return;
+      if (_isRunning || _isPaused) return;
+      await _applyPhoneSelectedMinutes(minutes);
+    }, onError: (_) {});
+  }
+
+  Future<void> _applyPhoneSelectedMinutes(int minutes) async {
+    final durationSeconds = minutes * 60;
+    if (!mounted) return;
+    setState(() {
+      _selectedMinutes = minutes;
+      _originalTime = durationSeconds;
+      _secondsRemaining = durationSeconds;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('selected_minutes', minutes);
+    } catch (_) {}
+  }
+
   // Telefona "toplam ne kadar?" diye sor
   Future<void> _requestTotalFromPhone() async {
     try {
       final int total = await platform.invokeMethod('getTotalMinutes');
-      if (mounted) {
-        setState(() {
-          _totalWorkMinutes = total;
-        });
-      }
+      if (!mounted) return;
+      _lastPhoneReportedTotal = total;
+      _recomputeStatsDisplay();
     } catch (_) {
-      // Telefon bağlı değil, sorun yok
+      // Telefon bağlı değil — sadece saat yerel toplamı _recomputeStatsDisplay ile kalır
+      if (mounted) _recomputeStatsDisplay();
     }
   }
 
@@ -308,6 +363,63 @@ class WearAppState extends State<WearApp> {
     }
   }
 
+  /// Süre listesi: dokunmatik tekerlek veya taç ile dikey kaydırma.
+  void _scrollSettingsByVerticalDelta(double dy) {
+    if (!_settingsScrollController.hasClients || dy == 0) return;
+    final c = _settingsScrollController;
+    final next = (c.offset + dy).clamp(0.0, c.position.maxScrollExtent);
+    if (next != c.offset) c.jumpTo(next);
+  }
+
+  void _stepWearPage(int direction) {
+    if (direction > 0 && _currentPage < 2) {
+      _currentPage++;
+      _pageController.animateToPage(
+        _currentPage,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } else if (direction < 0 && _currentPage > 0) {
+      _currentPage--;
+      _pageController.animateToPage(
+        _currentPage,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  void _handlePointerScroll(double dy) {
+    if (dy == 0) return;
+    if (_currentPage == 2) {
+      _scrollSettingsByVerticalDelta(dy);
+      return;
+    }
+    if (dy > 0) {
+      _stepWearPage(1);
+    } else if (dy < 0) {
+      _stepWearPage(-1);
+    }
+  }
+
+  /// Native rotary encoder (Galaxy / Pixel taç vb.); küçük adımları biriktirip sayfa veya liste kaydırır.
+  void _handleRotaryAxis(double axis) {
+    if (_currentPage == 2) {
+      _scrollSettingsByVerticalDelta(axis * 56);
+      return;
+    }
+    _rotaryPageAccum += axis;
+    const step = 0.24;
+    while (_rotaryPageAccum >= step) {
+      _rotaryPageAccum -= step;
+      _stepWearPage(1);
+    }
+    while (_rotaryPageAccum <= -step) {
+      _rotaryPageAccum += step;
+      _stepWearPage(-1);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -329,29 +441,17 @@ class WearAppState extends State<WearApp> {
           backgroundColor: Colors.black,
           body: Listener(
             onPointerSignal: (signal) {
-              // Handle rotary/bezel scroll to switch pages
               if (signal is PointerScrollEvent) {
-                if (signal.scrollDelta.dy > 0 && _currentPage < 2) {
-                  _currentPage++;
-                  _pageController.animateToPage(
-                    _currentPage,
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                  );
-                } else if (signal.scrollDelta.dy < 0 && _currentPage > 0) {
-                  _currentPage--;
-                  _pageController.animateToPage(
-                    _currentPage,
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeOut,
-                  );
-                }
+                _handlePointerScroll(signal.scrollDelta.dy);
               }
             },
             child: PageView(
               controller: _pageController,
               onPageChanged: (index) {
-                setState(() => _currentPage = index);
+                setState(() {
+                  _currentPage = index;
+                  _rotaryPageAccum = 0;
+                });
                 // İstatistikler sayfasına gelince refresh yap
                 if (index == 1) {
                   _requestTotalFromPhone();
@@ -375,10 +475,38 @@ class WearAppState extends State<WearApp> {
         : 0.0;
 
     return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
       children: [
-        // Süre seçmek için bilgi yazısı - SÜRENİN ÜSTÜNDE
+        // Çember (altta): Impeller + küçük ekranda güvenilir boyut; dokunuşları yutmaz
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Yuvarlak yüzeyin çevresini kapla (kenara yakın; güvenli pay ~%3)
+              final shortest = math.min(
+                constraints.maxWidth,
+                constraints.maxHeight,
+              );
+              final side = math.max(140.0, shortest * 0.995);
+              return Center(
+                child: IgnorePointer(
+                  child: RepaintBoundary(
+                    child: SizedBox(
+                      width: side,
+                      height: side,
+                      child: CustomPaint(
+                        painter: _WearClockFramePainter(progress: progress),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
         Positioned(
-          top: 45,
+          top: 38,
           left: 0,
           right: 0,
           child: IgnorePointer(
@@ -392,148 +520,139 @@ class WearAppState extends State<WearApp> {
           ),
         ),
 
-        // Süre yazısı - ORTADA
-        Positioned(
-          top: 60,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: Text(
-              _formatTime(_secondsRemaining),
-              style: const TextStyle(
-                fontSize: 44,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ),
-
-        // Saat çerçevesi - ORTADA YUKARDA
-        Positioned(
-          top: 4,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: SizedBox(
-              width: 220,
-              height: 220,
-              child: CustomPaint(
-                painter: _WearClockFramePainter(progress: progress),
-              ),
-            ),
-          ),
-        ),
-
-        // Başlat/Duraklat butonu ve yazı - ALTTA
-        Positioned(
-          bottom: 40,
-          left: 0,
-          right: 0,
-          child: _isPaused
-              ? Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Column(
-                      children: [
-                        GestureDetector(
-                          behavior:
-                              HitTestBehavior.opaque, // Tıklamayı garanti et
-                          onTap: () {
-                            _startTimer();
-                          },
-                          child: Container(
-                            width: 46,
-                            height: 46,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.green,
-                            ),
-                            child: const Icon(
-                              Icons.play_arrow,
-                              color: Colors.white,
-                              size: 26,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _t('Resume', 'Devam'),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 30),
-                    Column(
-                      children: [
-                        GestureDetector(
-                          behavior:
-                              HitTestBehavior.opaque, // Tıklamayı garanti et
-                          onTap: () {
-                            _resetTimer();
-                          },
-                          child: Container(
-                            width: 46,
-                            height: 46,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.red,
-                            ),
-                            child: const Icon(
-                              Icons.stop,
-                              color: Colors.white,
-                              size: 26,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _t('Reset', 'Sıfırla'),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.white70,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              : Column(
-                  children: [
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque, // Tıklamayı garanti et
-                      onTap: () {
-                        _startTimer();
-                      },
-                      child: Container(
-                        width: 46,
-                        height: 46,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _isRunning ? Colors.orange : Colors.green,
-                        ),
-                        child: Icon(
-                          _isRunning ? Icons.pause : Icons.play_arrow,
-                          color: Colors.white,
-                          size: 26,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _isRunning
-                          ? _t('Pause', 'Duraklat')
-                          : _t('Start', 'Başlat'),
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ],
+        Center(
+          child: LayoutBuilder(
+            builder: (context, c) {
+              return Padding(
+                padding: EdgeInsets.only(bottom: c.maxHeight * 0.06),
+                child: Text(
+                  _formatTime(_secondsRemaining),
+                  style: const TextStyle(
+                    fontSize: 44,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
+              );
+            },
+          ),
+        ),
+
+        Positioned(
+          bottom: 22,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: _isPaused
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              _startTimer();
+                            },
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.green,
+                              ),
+                              child: const Icon(
+                                Icons.play_arrow,
+                                color: Colors.white,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _t('Resume', 'Devam'),
+                            style: const TextStyle(
+                              fontSize: 9,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 22),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                _finishWorkEarly();
+                              },
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                decoration: const BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.deepPurple,
+                                ),
+                                child: const Icon(
+                                  Icons.flag,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              _t('Finish', 'Bitir'),
+                              style: const TextStyle(
+                                fontSize: 9,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          _startTimer();
+                        },
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isRunning ? Colors.orange : Colors.green,
+                          ),
+                          child: Icon(
+                            _isRunning ? Icons.pause : Icons.play_arrow,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _isRunning
+                            ? _t('Pause', 'Duraklat')
+                            : _t('Start', 'Başlat'),
+                        style: const TextStyle(
+                          fontSize: 9,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
       ],
     );
@@ -708,18 +827,7 @@ class WearAppState extends State<WearApp> {
   Widget _buildSettingsPage() {
     final List<int> availableMinutes = [15, 20, 25, 30, 45, 60];
 
-    return Listener(
-      onPointerSignal: (signal) {
-        // Ayarlar sayfasında döner çerçeve ile scroll
-        if (signal is PointerScrollEvent) {
-          if (_settingsScrollController.hasClients) {
-            _settingsScrollController.jumpTo(
-              _settingsScrollController.offset + signal.scrollDelta.dy,
-            );
-          }
-        }
-      },
-      child: Center(
+    return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -789,7 +897,6 @@ class WearAppState extends State<WearApp> {
             ),
           ],
         ),
-      ),
     );
   }
 }
@@ -802,52 +909,58 @@ class _WearClockFramePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final shortest = math.min(size.width, size.height);
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 5;
 
-    // Arka plan çember
+    // Dış çember (bezel): inset az = yüz kenarına daha yakın, görsel olarak daha büyük halka
+    const double edgeInset = 1.0;
+    const double trackStroke = 7.5;
+    final double rimOuter = shortest / 2 - edgeInset;
+    final double ringRadius = (rimOuter - trackStroke / 2).clamp(8.0, rimOuter);
+
+    // Arka plan çemberi
     final bgPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.15)
+      ..color = Colors.white.withValues(alpha: 0.18)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 8;
-    canvas.drawCircle(center, radius, bgPaint);
+      ..strokeWidth = trackStroke;
+    canvas.drawCircle(center, ringRadius, bgPaint);
 
-    // Progress çizgisi
+    // İlerleme yayı — aynı hatta
     final progressPaint = Paint()
       ..color = Colors.deepPurple
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 8
+      ..strokeWidth = trackStroke
       ..strokeCap = StrokeCap.round;
 
-    const startAngle = -90 * 3.14159 / 180; // Saat 12'den başla
-    final sweepAngle = 2 * 3.14159 * progress;
+    final startAngle = -math.pi / 2;
+    final sweepAngle = 2 * math.pi * progress.clamp(0.0, 1.0);
     canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
+      Rect.fromCircle(center: center, radius: ringRadius),
       startAngle,
       sweepAngle,
       false,
       progressPaint,
     );
 
-    // 12 SAAT ÇİZGİSİ (her 30 derece) - TAM dış çembere oturuyor
+    // Saat çizgileri: uçları dış rim’e dayalı, yüzeye doğru (bezel görünümü)
     for (int i = 0; i < 12; i++) {
-      final angle = (i * 30 - 90) * 3.14159 / 180;
-
-      // Ana saat çizgileri (12, 3, 6, 9) daha kalın
+      final angle = (i * 30 - 90) * math.pi / 180;
       final isMainHour = i % 3 == 0;
 
       final hourMarkPaint = Paint()
-        ..color = Colors.white.withValues(alpha: isMainHour ? 0.7 : 0.5)
+        ..color = Colors.white.withValues(alpha: isMainHour ? 0.85 : 0.6)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = isMainHour ? 4.0 : 2.5
+        ..strokeWidth = isMainHour ? 3.5 : 2.2
         ..strokeCap = StrokeCap.round;
 
-      final markLength = isMainHour ? 15.0 : 10.0;
-      // Çizgiler TAM radius'a denk geliyor (boşluksuz)
-      final x1 = center.dx + (radius - markLength) * cos(angle);
-      final y1 = center.dy + (radius - markLength) * sin(angle);
-      final x2 = center.dx + radius * cos(angle);
-      final y2 = center.dy + radius * sin(angle);
+      final markLength = isMainHour ? 14.0 : 9.0;
+      final outerR = rimOuter - 1.0;
+      final innerR = math.min(outerR - 2.0, math.max(6.0, outerR - markLength));
+
+      final x1 = center.dx + innerR * math.cos(angle);
+      final y1 = center.dy + innerR * math.sin(angle);
+      final x2 = center.dx + outerR * math.cos(angle);
+      final y2 = center.dy + outerR * math.sin(angle);
 
       canvas.drawLine(Offset(x1, y1), Offset(x2, y2), hourMarkPaint);
     }

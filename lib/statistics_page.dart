@@ -156,11 +156,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
     // Lokal ve cloud verilerini birleştir
     final Map<String, int> combinedMap = {};
     
-    // Lokal verileri ekle
+    // Lokal verileri ekle (tüm aylar — sıfır dakika olsa da satır görünsün)
     for (final localEntry in localMonthly) {
-      if (localEntry.value > 0) {
-        combinedMap[localEntry.key] = localEntry.value;
-      }
+      combinedMap[localEntry.key] = localEntry.value;
     }
     
     // Cloud saat verilerini ekle
@@ -323,14 +321,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Widget _buildDailyStats() {
-    // Lokal telefon istatistiklerini al
-    final localTodayMinutes = widget.statistics.getTodayMinutes();
-    
-    // Cloud saat verilerini al
-    final watchTodayMinutes = _getCloudTodayMinutes(source: 'watch');
-    
-    // Toplam: lokal (telefon) + cloud saat verisi
-    final totalTodayMinutes = localTodayMinutes + watchTodayMinutes;
+    final combinedToday = widget.statistics.getTodayMinutes();
+    final watchLocalToday = widget.statistics.getWatchTodayMinutes();
+    final watchCloudToday = _getCloudTodayMinutes(source: 'watch');
+    final watchTodayMinutes = watchLocalToday + watchCloudToday;
+    final phoneTodayMinutes = widget.statistics.getPhoneTodayMinutes();
+    final totalTodayMinutes = combinedToday + watchCloudToday;
     
     return Column(
       children: [
@@ -350,9 +346,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
           children: [
             Expanded(
               child: _buildSmallStatsCard(
-                'Telefon',
+                widget.settings.getText('stats_phone'),
                 widget.statistics.formatMinutes(
-                  localTodayMinutes,
+                  phoneTodayMinutes,
                   language: widget.settings.currentLanguage,
                 ),
                 Icons.phone_android,
@@ -361,7 +357,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
             const SizedBox(width: 4),
             Expanded(
               child: _buildSmallStatsCard(
-                'Saat',
+                widget.settings.getText('stats_watch'),
                 widget.statistics.formatMinutes(
                   watchTodayMinutes,
                   language: widget.settings.currentLanguage,
@@ -506,7 +502,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 
   Widget _buildMonthItem(String monthKey, int minutes) {
-    final month = widget.statistics.formatMonthForDisplay(monthKey);
+    final month = widget.statistics.formatMonthForDisplay(
+      monthKey,
+      language: widget.settings.currentLanguage,
+    );
     final thisMonth = DateTime.now();
     final itemMonth = DateTime.parse('$monthKey-01');
     final isThisMonth =

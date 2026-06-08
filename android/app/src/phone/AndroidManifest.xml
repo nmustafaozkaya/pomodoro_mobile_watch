@@ -7,13 +7,23 @@
         tools:node="remove" />
     
     <application>
-        <!-- Data Layer Listener Service -->
+        <!-- Data Layer: path filtreli DATA_CHANGED (BIND_LISTENER release lint’te fatal). -->
         <service
             android:name="com.nmodev.pomodoro.DataLayerListenerService"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
-                <data android:scheme="wear" android:host="*" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/pomodoro" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/total" />
             </intent-filter>
         </service>
         

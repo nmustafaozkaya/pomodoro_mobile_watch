@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'settings_model.dart';
 
+/// Gizlilik metni: veri yalnızca cihazda ve (Android’de) telefon–saat arasında Google Wear Data Layer ile taşınır; harici API / sunucu yoktur.
 class PrivacyPolicyPage extends StatelessWidget {
   final SettingsModel settings;
   final String wallpaper;
@@ -26,7 +27,6 @@ class PrivacyPolicyPage extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
-              // Header
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Row(
@@ -49,8 +49,6 @@ class PrivacyPolicyPage extends StatelessWidget {
                   ],
                 ),
               ),
-
-              // Content
               Expanded(
                 child: Container(
                   margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -69,53 +67,50 @@ class PrivacyPolicyPage extends StatelessWidget {
                       children: [
                         _buildSection(
                           title: isEnglish
-                              ? 'What Data We Collect'
-                              : 'Hangi Verileri Topluyoruz',
+                              ? 'What data is stored'
+                              : 'Hangi veriler saklanır',
                           content: isEnglish
-                              ? 'We collect only the following data to provide synchronization between your phone and watch:\n\n• Pomodoro session duration (minutes)\n• Session date and time\n• Device type (phone or watch)\n• Anonymous user ID (generated automatically)'
-                              : 'Telefon ve saatiniz arasında senkronizasyon sağlamak için sadece şu verileri topluyoruz:\n\n• Pomodoro oturum süresi (dakika)\n• Oturum tarihi ve saati\n• Cihaz tipi (telefon veya saat)\n• Anonim kullanıcı kimliği (otomatik oluşturulur)',
+                              ? 'The app stores Pomodoro-related information only on your devices:\n\n• Completed work minutes and simple statistics (daily / monthly summaries)\n• Your timer preferences (duration, break length, language, wallpaper, alarm sound)\n\nThere is no user account, no advertising ID, and no UUID or “unique user id” collected for this app.'
+                              : 'Uygulama yalnızca Pomodoro ile ilgili bilgileri cihazlarınızda saklar:\n\n• Tamamlanan çalışma dakikaları ve basit istatistikler (günlük / aylık özetler)\n• Zamanlayıcı tercihleriniz (süre, ara, dil, duvar kağıdı, alarm sesi)\n\nHesap yoktur, reklam kimliği toplanmaz; uygulama için UUID veya “benzersiz kullanıcı kimliği” tutulmaz.',
                         ),
                         const SizedBox(height: 20),
-
                         _buildSection(
                           title: isEnglish
-                              ? 'How We Use Your Data'
-                              : 'Verilerinizi Nasıl Kullanıyoruz',
+                              ? 'Phone and watch (Android)'
+                              : 'Telefon ve saat (Android)',
                           content: isEnglish
-                              ? 'Your data is used ONLY for:\n\n• Synchronizing your Pomodoro statistics between devices\n• Displaying your work statistics\n• Nothing else!\n\nWe do NOT:\n• Sell your data\n• Share your data with third parties\n• Use your data for advertising\n• Track your personal information'
-                              : 'Verileriniz SADECE şunlar için kullanılır:\n\n• Cihazlarınız arasında Pomodoro istatistiklerinizi senkronize etmek\n• Çalışma istatistiklerinizi görüntülemek\n• Başka hiçbir şey!\n\nAsla:\n• Verilerinizi satmayız\n• Üçüncü taraflarla paylaşmayız\n• Reklam için kullanmayız\n• Kişisel bilgilerinizi takip etmeyiz',
+                              ? 'On Android, paired phone and Wear OS watch exchange data through Google’s Wearable Data Layer (session minutes, totals, timer settings). This link is between your own devices over Google Play services—not through our servers, because we do not operate a backend API for this app.'
+                              : 'Android’de eşleşmiş telefon ve Wear OS saat, Google Wearable Data Layer üzerinden (oturum dakikaları, toplamlar, zamanlayıcı ayarları) veri alışverişi yapar. Bu bağlantı kendi cihazlarınız ve Google Play hizmetleri arasındadır; uygulamanın harici bir API sunucusu yoktur.',
                         ),
                         const SizedBox(height: 20),
-
                         _buildSection(
-                          title: isEnglish ? 'Data Security' : 'Veri Güvenliği',
+                          title: isEnglish
+                              ? 'How we use your data'
+                              : 'Verilerinizi nasıl kullanıyoruz',
                           content: isEnglish
-                              ? 'Your data is:\n\n• Stored securely on our server\n• Encrypted during transmission\n• Anonymous (no personal information)\n• Only accessible by you through your unique user ID'
-                              : 'Verileriniz:\n\n• Sunucumuzda güvenli şekilde saklanır\n• İletim sırasında şifrelenir\n• Anonimdir (kişisel bilgi içermez)\n• Sadece benzersiz kullanıcı kimliğiniz ile size erişilebilir',
+                              ? 'Data is used only to run the timer, show statistics, and keep phone and watch in sync when you use both. We do not sell data, share it with third parties, or use it for advertising.'
+                              : 'Veriler yalnızca zamanlayıcıyı çalıştırmak, istatistikleri göstermek ve telefon ile saati birlikte kullandığınızda eşitlemek için kullanılır. Verilerinizi satmıyor, üçüncü taraflarla paylaşmıyor ve reklam için kullanmıyoruz.',
                         ),
                         const SizedBox(height: 20),
-
                         _buildSection(
-                          title: isEnglish ? 'Data Deletion' : 'Veri Silme',
+                          title: isEnglish ? 'Data deletion' : 'Veri silme',
                           content: isEnglish
-                              ? 'Your data is stored for statistical purposes only. If you uninstall the app:\n\n• Local data on your device will be automatically deleted\n• Server data will remain for synchronization if you reinstall\n• To permanently delete all data, contact us at: nmustafa.ozkaya@gmail.com'
-                              : 'Verileriniz sadece istatistik amaçlı saklanır. Uygulamayı kaldırırsanız:\n\n• Cihazdaki lokal veriler otomatik silinir\n• Sunucu verileri yeniden yükleme için kalır\n• Tüm verileri kalıcı olarak silmek için bize ulaşın: nmustafa.ozkaya@gmail.com',
+                              ? 'Uninstalling the app removes its local data from that device. To clear statistics inside the app, use any clear-stats option if provided in a future update, or reinstall. We do not retain copies on our servers (there is no central server for this product).'
+                              : 'Uygulamayı kaldırmak, o cihazdaki yerel verileri siler. İstatistikleri uygulama içinden temizlemek için (ileride eklenirse) ilgili seçeneği kullanabilir veya uygulamayı yeniden kurabilirsiniz. Merkezi bir sunucuda kopya tutulmaz (böyle bir sunucu yoktur).',
                         ),
                         const SizedBox(height: 20),
-
                         _buildSection(
-                          title: isEnglish ? '📧 Contact Us' : '📧 İletişim',
+                          title: isEnglish ? 'Contact' : 'İletişim',
                           content: isEnglish
-                              ? 'If you have any questions about this Privacy Policy, please contact us:\n\nEmail: nmustafa.ozkaya@gmail.com\nDeveloper: NMO Dev'
-                              : 'Bu Gizlilik Politikası hakkında sorularınız varsa lütfen bize ulaşın:\n\nE-posta: nmustafa.ozkaya@gmail.com\nGeliştirici: NMO Dev',
+                              ? 'Questions about this policy: nmustafa.ozkaya@gmail.com\nDeveloper: NMO Dev'
+                              : 'Bu politika hakkında sorular: nmustafa.ozkaya@gmail.com\nGeliştirici: NMO Dev',
                         ),
                         const SizedBox(height: 20),
-
                         Center(
                           child: Text(
                             isEnglish
-                                ? 'Last Updated: January 2026'
-                                : 'Son Güncelleme: Ocak 2026',
+                                ? 'Last updated: May 2026'
+                                : 'Son güncelleme: Mayıs 2026',
                             style: TextStyle(
                               color: Colors.white.withValues(alpha: 0.7),
                               fontSize: 12,

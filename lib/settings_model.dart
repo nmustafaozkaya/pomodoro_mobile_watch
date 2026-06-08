@@ -134,6 +134,7 @@ class SettingsModel {
     'start': 'Başlat',
     'pause': 'Duraklat',
     'continue': 'Devam Et',
+    'finish': 'Bitir',
     'reset': 'Sıfırla',
     'paused': 'Duraklatıldı',
     'select_time': 'Süre Seç',
@@ -157,6 +158,8 @@ class SettingsModel {
     'break': 'Ara',
     'break_time': 'Ara Süresi',
     'skip': 'Atla',
+    'stats_phone': 'Telefon',
+    'stats_watch': 'Saat',
   };
 
   // English texts
@@ -169,6 +172,7 @@ class SettingsModel {
     'start': 'Start',
     'pause': 'Pause',
     'continue': 'Continue',
+    'finish': 'Finish',
     'reset': 'Reset',
     'paused': 'Paused',
     'select_time': 'Select Time',
@@ -192,5 +196,7 @@ class SettingsModel {
     'break': 'Break',
     'break_time': 'Break Time',
     'skip': 'Skip',
+    'stats_phone': 'Phone',
+    'stats_watch': 'Watch',
   };
 }
