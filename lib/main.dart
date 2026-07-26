@@ -1,11 +1,20 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'phone_app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // AdMob SDK'sını başlat
+  try {
+    await MobileAds.instance.initialize();
+  } catch (e) {
+    if (kDebugMode) {
+      print('AdMob initialization error: $e');
+    }
+  }
 
   // Global error handler - crash önleme
   FlutterError.onError = (FlutterErrorDetails details) {

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
@@ -54,6 +57,34 @@ class _PhoneHomeState extends State<PhoneHome> {
   bool _isWallpaperLoaded = false; // Wallpaper yükleme durumu
   bool _isTimerRunning = false; // Timer çalışıyor mu?
 
+  BannerAd? _bannerAd;
+  bool _isBannerAdLoaded = false;
+
+  void _loadBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-8252438794686125/4398652800' // Real Android Banner ID
+          : 'ca-app-pub-8252438794686125/1692598412', // Real iOS Banner ID
+      request: const AdRequest(),
+      size: AdSize.banner,
+      listener: BannerAdListener(
+        onAdLoaded: (ad) {
+          if (mounted) {
+            setState(() {
+              _isBannerAdLoaded = true;
+            });
+          }
+        },
+        onAdFailedToLoad: (ad, err) {
+          if (kDebugMode) {
+            print('Banner Ad failed to load: $err');
+          }
+          ad.dispose();
+        },
+      ),
+    )..load();
+  }
+
 
   @override
   void initState() {
@@ -61,6 +92,7 @@ class _PhoneHomeState extends State<PhoneHome> {
     _settings = SettingsModel();
     _statistics = StatisticsModel();
     _loadSettings();
+    _loadBannerAd();
     // Context hazır olduktan sonra wallpaper'ı yükle
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -71,6 +103,7 @@ class _PhoneHomeState extends State<PhoneHome> {
 
   @override
   void dispose() {
+    _bannerAd?.dispose();
     super.dispose();
   }
 
@@ -271,6 +304,18 @@ class _PhoneHomeState extends State<PhoneHome> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Banner Reklam (Navbar üstünde)
+                    if (_isBannerAdLoaded && _bannerAd != null)
+                      Container(
+                        width: _bannerAd!.size.width.toDouble(),
+                        height: _bannerAd!.size.height.toDouble(),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: AdWidget(ad: _bannerAd!),
+                      ),
                     // Navigation Bar
                     BottomNavigationBar(
                       backgroundColor: Colors.transparent,

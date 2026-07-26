@@ -28,10 +28,6 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
-    // 3. parti plugin'lerden gelen "deprecated API" notlarını sustur
-    tasks.withType<JavaCompile>().configureEach {
-        options.compilerArgs.addAll(listOf("-Xlint:-deprecation", "-Xlint:-options"))
-    }
     
     defaultConfig {
         // Application ID for Google Play
