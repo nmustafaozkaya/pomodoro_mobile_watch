@@ -39,34 +39,16 @@ android {
         versionName = flutter.versionName
     }
     
-    flavorDimensions += "platform"
-    productFlavors {
-        create("phone") {
-            dimension = "platform"
-            // Aynı package name: com.nmodev.pomodoro
-        }
-        create("wear") {
-            dimension = "platform"
-            // Aynı package name: com.nmodev.pomodoro
-            isDefault = true // Default flavor for debug builds
-        }
-    }
-    
-    sourceSets {
-        getByName("phone") {
-            java.srcDirs("src/phone/kotlin")
-        }
-        getByName("wear") {
-            java.srcDirs("src/wear/kotlin")
-        }
-    }
+
     
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
-            storePassword = keystoreProperties["storePassword"] as String
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
+                storePassword = keystoreProperties["storePassword"] as String
+            }
         }
     }
     
@@ -78,10 +60,7 @@ android {
 }
 
 dependencies {
-    // Wear OS Data Layer API
-    implementation("com.google.android.gms:play-services-wearable:18.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 }
 
 flutter {

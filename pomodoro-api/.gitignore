@@ -1,6 +1,0 @@
-node_modules/
-pomodoro.db
-*.log
-.env
-.DS_Store
-

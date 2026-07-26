@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
@@ -10,7 +11,6 @@ import 'settings_page.dart';
 import 'settings_model.dart';
 import 'statistics_model.dart';
 import 'dart:math' as math;
-import 'phone_wear_bridge.dart';
 
 class PhoneApp extends StatelessWidget {
   const PhoneApp({super.key});
@@ -56,18 +56,42 @@ class _PhoneHomeState extends State<PhoneHome> {
   String _currentWallpaper = 'wallpaper1.jpg';
   bool _isWallpaperLoaded = false; // Wallpaper yükleme durumu
   bool _isTimerRunning = false; // Timer çalışıyor mu?
-  /// Saat oturumu gelince İstatistikler sekmesi state'ini yeniden kurmak için.
-  int _statsRefreshKey = 0;
 
-  StreamSubscription<dynamic>? _wearSessionSub;
+  BannerAd? _bannerAd;
+  bool _isBannerAdLoaded = false;
+
+  void _loadBannerAd() {
+    _bannerAd = BannerAd(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-8252438794686125/4398652800' // Real Android Banner ID
+          : 'ca-app-pub-8252438794686125/1692598412', // Real iOS Banner ID
+      request: const AdRequest(),
+      size: AdSize.banner,
+      listener: BannerAdListener(
+        onAdLoaded: (ad) {
+          if (mounted) {
+            setState(() {
+              _isBannerAdLoaded = true;
+            });
+          }
+        },
+        onAdFailedToLoad: (ad, err) {
+          if (kDebugMode) {
+            print('Banner Ad failed to load: $err');
+          }
+          ad.dispose();
+        },
+      ),
+    )..load();
+  }
 
   @override
   void initState() {
     super.initState();
     _settings = SettingsModel();
     _statistics = StatisticsModel();
-    _bootstrapPhoneAndWear();
-    _attachWearSessionListener();
+    _loadSettings();
+    _loadBannerAd();
     // Context hazır olduktan sonra wallpaper'ı yükle
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -76,42 +100,13 @@ class _PhoneHomeState extends State<PhoneHome> {
     });
   }
 
-  /// Ayarları yükler ve Wear OS ile süre/dil bilgisini Data Layer üzerinden paylaşır (API yok).
-  Future<void> _bootstrapPhoneAndWear() async {
-    try {
-      await _loadSettings();
-      await PhoneWearBridge.pushTimerSettings(
-        selectedMinutes: _settings.selectedMinutes,
-        breakMinutes: _settings.breakMinutes,
-        language: _settings.currentLanguage,
-      );
-    } catch (_) {}
-    if (mounted) setState(() {});
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    super.dispose();
   }
 
-  void _attachWearSessionListener() {
-    if (!Platform.isAndroid) return;
-    const channel = EventChannel('com.pomodoro.phone/session_updates');
-    _wearSessionSub = channel.receiveBroadcastStream().listen((event) async {
-      if (event is! Map) return;
-      final rawSource = event['source']?.toString() ?? '';
-      final source = rawSource.toLowerCase().trim();
-      final completedRaw = event['isCompleted'];
-      final sessionMinutes =
-          (event['sessionMinutes'] as num?)?.toInt() ?? 0;
-      // Saatten gelen oturumlar. isCompleted bazen iletilmez; yalnızca açık false ise atla.
-      if (source == 'watch' &&
-          sessionMinutes > 0 &&
-          completedRaw != false) {
-        await _statistics.recordWatchSession(sessionMinutes);
-        if (mounted) {
-          setState(() {
-            _statsRefreshKey++;
-          });
-        }
-      }
-    });
-  }
+
 
   Future<void> _loadSettings() async {
     try {
@@ -196,7 +191,7 @@ class _PhoneHomeState extends State<PhoneHome> {
         );
       case 1:
         return StatisticsPage(
-          key: ValueKey('stats_${_statsRefreshKey}_$_currentWallpaper'),
+          key: ValueKey('stats_$_currentWallpaper'),
           settings: _settings,
           statistics: _statistics,
           wallpaper: _currentWallpaper,
@@ -232,11 +227,6 @@ class _PhoneHomeState extends State<PhoneHome> {
     try {
       // Reload settings to get updated language
       await _settings.loadSettings();
-      await PhoneWearBridge.pushTimerSettings(
-        selectedMinutes: _settings.selectedMinutes,
-        breakMinutes: _settings.breakMinutes,
-        language: _settings.currentLanguage,
-      );
       if (mounted) {
         setState(() {
           // This will trigger a rebuild with the new language
@@ -247,11 +237,7 @@ class _PhoneHomeState extends State<PhoneHome> {
     }
   }
 
-  @override
-  void dispose() {
-    _wearSessionSub?.cancel();
-    super.dispose();
-  }
+
 
   Widget _buildBackground() {
     return Stack(
@@ -295,56 +281,78 @@ class _PhoneHomeState extends State<PhoneHome> {
     return Scaffold(
       backgroundColor: Colors.white, // Splash ile uyumlu
       extendBodyBehindAppBar: true,
-      body: SafeArea(
-        top: true,
-        bottom: false,
-        child: Stack(
-          children: [
-            // Arka plan resmi tüm ekranı kaplasın
-            _buildBackground(),
-            // Sayfa içeriği
-            _buildCurrentPage(),
-            // Navbar en üstte (timer çalışıyorsa gizle)
-            if (!_isTimerRunning)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: BottomNavigationBar(
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  type: BottomNavigationBarType.fixed,
-                  currentIndex: _selectedIndex,
-                  onTap: (index) async {
-                    if (index == 1) {
-                      try {
-                        await _statistics.loadStatistics();
-                      } catch (_) {}
-                    }
-                    if (mounted) {
-                      setState(() => _selectedIndex = index);
-                    }
-                  },
-                  selectedItemColor: Colors.white,
-                  unselectedItemColor: Colors.white70,
-                  items: [
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.timer),
-                      label: _settings.getText('timer'),
-                    ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.analytics),
-                      label: _settings.getText('statistics'),
-                    ),
-                    BottomNavigationBarItem(
-                      icon: Icon(Icons.settings),
-                      label: _settings.getText('settings'),
+      body: Stack(
+        children: [
+          // Arka plan resmi tüm ekranı kaplasın
+          Positioned.fill(
+            child: _buildBackground(),
+          ),
+          // Sayfa içeriği
+          Positioned.fill(
+            child: _buildCurrentPage(),
+          ),
+          // Navbar en altta (timer çalışıyorsa gizle)
+          if (!_isTimerRunning)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                bottom: true,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Banner Reklam (Navbar üstünde)
+                    if (_isBannerAdLoaded && _bannerAd != null)
+                      Container(
+                        width: _bannerAd!.size.width.toDouble(),
+                        height: _bannerAd!.size.height.toDouble(),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: AdWidget(ad: _bannerAd!),
+                      ),
+                    // Navigation Bar
+                    BottomNavigationBar(
+                      backgroundColor: Colors.transparent,
+                      elevation: 0,
+                      type: BottomNavigationBarType.fixed,
+                      currentIndex: _selectedIndex,
+                      onTap: (index) async {
+                        if (index == 1) {
+                          try {
+                            await _statistics.loadStatistics();
+                          } catch (_) {}
+                        }
+                        if (mounted) {
+                          setState(() => _selectedIndex = index);
+                        }
+                      },
+                      selectedItemColor: Colors.white,
+                      unselectedItemColor: Colors.white70,
+                      items: [
+                        BottomNavigationBarItem(
+                          icon: const Icon(Icons.timer),
+                          label: _settings.getText('timer'),
+                        ),
+                        BottomNavigationBarItem(
+                          icon: const Icon(Icons.analytics),
+                          label: _settings.getText('statistics'),
+                        ),
+                        BottomNavigationBarItem(
+                          icon: const Icon(Icons.settings),
+                          label: _settings.getText('settings'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -642,7 +650,6 @@ class _TimerPageState extends State<_TimerPage>
       if (sessionMinutes > 0) {
         // 1. Önce lokal'e kaydet (offline çalışma için)
         await widget.statistics.recordSession(sessionMinutes);
-        await PhoneWearBridge.syncPhoneWorkSession(sessionMinutes);
         widget.onStatisticsMayHaveChanged();
       }
       _sessionStartSeconds = 0;
@@ -652,7 +659,6 @@ class _TimerPageState extends State<_TimerPage>
   // Erken bitir / kısmi session kaydet
   Future<void> _recordPartialSession(int workedMinutes) async {
     await widget.statistics.recordSession(workedMinutes);
-    await PhoneWearBridge.syncPhoneWorkSession(workedMinutes);
     widget.onStatisticsMayHaveChanged();
   }
 
@@ -845,10 +851,12 @@ class _TimerPageState extends State<_TimerPage>
           ),
         ),
         child: SafeArea(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
+          child: Padding(
+            padding: EdgeInsets.only(bottom: _isRunning ? 0 : 80),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
                 // Timer with Hour Marks
                 Stack(
                   alignment: Alignment.center,
@@ -1038,6 +1046,7 @@ class _TimerPageState extends State<_TimerPage>
               ],
             ),
           ),
+        ),
         ),
       ),
     );

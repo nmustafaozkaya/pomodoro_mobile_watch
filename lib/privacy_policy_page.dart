@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'settings_model.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 /// Gizlilik metni: veri yalnızca cihazda ve (Android’de) telefon–saat arasında Google Wear Data Layer ile taşınır; harici API / sunucu yoktur.
 class PrivacyPolicyPage extends StatelessWidget {
@@ -70,17 +72,17 @@ class PrivacyPolicyPage extends StatelessWidget {
                               ? 'What data is stored'
                               : 'Hangi veriler saklanır',
                           content: isEnglish
-                              ? 'The app stores Pomodoro-related information only on your devices:\n\n• Completed work minutes and simple statistics (daily / monthly summaries)\n• Your timer preferences (duration, break length, language, wallpaper, alarm sound)\n\nThere is no user account, no advertising ID, and no UUID or “unique user id” collected for this app.'
-                              : 'Uygulama yalnızca Pomodoro ile ilgili bilgileri cihazlarınızda saklar:\n\n• Tamamlanan çalışma dakikaları ve basit istatistikler (günlük / aylık özetler)\n• Zamanlayıcı tercihleriniz (süre, ara, dil, duvar kağıdı, alarm sesi)\n\nHesap yoktur, reklam kimliği toplanmaz; uygulama için UUID veya “benzersiz kullanıcı kimliği” tutulmaz.',
+                              ? 'The app stores Pomodoro-related information only on your device:\n\n• Completed work minutes and simple statistics (daily / monthly summaries)\n• Your timer preferences (duration, break length, language, wallpaper, alarm sound)\n\nThere is no user account, no advertising ID, and no UUID or “unique user id” collected for this app.'
+                              : 'Uygulama yalnızca Pomodoro ile ilgili bilgileri cihazınızda saklar:\n\n• Tamamlanan çalışma dakikaları ve basit istatistikler (günlük / aylık özetler)\n• Zamanlayıcı tercihleriniz (süre, ara, dil, duvar kağıdı, alarm sesi)\n\nHesap yoktur, reklam kimliği toplanmaz; uygulama için UUID veya “benzersiz kullanıcı kimliği” tutulmaz.',
                         ),
                         const SizedBox(height: 20),
                         _buildSection(
                           title: isEnglish
-                              ? 'Phone and watch (Android)'
-                              : 'Telefon ve saat (Android)',
+                              ? '100% Offline & Standalone'
+                              : '100% Çevrimdışı ve Bağımsız',
                           content: isEnglish
-                              ? 'On Android, paired phone and Wear OS watch exchange data through Google’s Wearable Data Layer (session minutes, totals, timer settings). This link is between your own devices over Google Play services—not through our servers, because we do not operate a backend API for this app.'
-                              : 'Android’de eşleşmiş telefon ve Wear OS saat, Google Wearable Data Layer üzerinden (oturum dakikaları, toplamlar, zamanlayıcı ayarları) veri alışverişi yapar. Bu bağlantı kendi cihazlarınız ve Google Play hizmetleri arasındadır; uygulamanın harici bir API sunucusu yoktur.',
+                              ? 'This app runs entirely on your local device. It does not connect to any external server, transfer data over the internet, or require any online accounts. Your data never leaves your device.'
+                              : 'Bu uygulama tamamen yerel cihazınızda çalışır. Herhangi bir harici sunucuya bağlanmaz, internet üzerinden veri aktarmaz ve çevrimiçi hesap gerektirmez. Verileriniz asla cihazınızdan dışarı çıkmaz.',
                         ),
                         const SizedBox(height: 20),
                         _buildSection(
@@ -88,35 +90,122 @@ class PrivacyPolicyPage extends StatelessWidget {
                               ? 'How we use your data'
                               : 'Verilerinizi nasıl kullanıyoruz',
                           content: isEnglish
-                              ? 'Data is used only to run the timer, show statistics, and keep phone and watch in sync when you use both. We do not sell data, share it with third parties, or use it for advertising.'
-                              : 'Veriler yalnızca zamanlayıcıyı çalıştırmak, istatistikleri göstermek ve telefon ile saati birlikte kullandığınızda eşitlemek için kullanılır. Verilerinizi satmıyor, üçüncü taraflarla paylaşmıyor ve reklam için kullanmıyoruz.',
+                              ? 'Data is used only to run the timer and show statistics. We do not sell data, share it with third parties, or use it for advertising.'
+                              : 'Veriler yalnızca zamanlayıcıyı çalıştırmak ve istatistikleri göstermek için kullanılır. Verilerinizi satmıyor, üçüncü taraflarla paylaşmıyor ve reklam için kullanmıyoruz.',
                         ),
                         const SizedBox(height: 20),
                         _buildSection(
                           title: isEnglish ? 'Data deletion' : 'Veri silme',
                           content: isEnglish
-                              ? 'Uninstalling the app removes its local data from that device. To clear statistics inside the app, use any clear-stats option if provided in a future update, or reinstall. We do not retain copies on our servers (there is no central server for this product).'
-                              : 'Uygulamayı kaldırmak, o cihazdaki yerel verileri siler. İstatistikleri uygulama içinden temizlemek için (ileride eklenirse) ilgili seçeneği kullanabilir veya uygulamayı yeniden kurabilirsiniz. Merkezi bir sunucuda kopya tutulmaz (böyle bir sunucu yoktur).',
+                              ? 'Uninstalling the app removes its local data from your device. We do not retain copies on our servers (there is no central server for this product).'
+                              : 'Uygulamayı kaldırmak, o cihazdaki yerel verileri tamamen siler. Merkezi bir sunucuda kopya tutulmaz (böyle bir sunucu yoktur).',
                         ),
                         const SizedBox(height: 20),
-                        _buildSection(
-                          title: isEnglish ? 'Contact' : 'İletişim',
-                          content: isEnglish
-                              ? 'Questions about this policy: nmustafa.ozkaya@gmail.com\nDeveloper: NMO Dev'
-                              : 'Bu politika hakkında sorular: nmustafa.ozkaya@gmail.com\nGeliştirici: NMO Dev',
-                        ),
-                        const SizedBox(height: 20),
-                        Center(
-                          child: Text(
-                            isEnglish
-                                ? 'Last updated: May 2026'
-                                : 'Son güncelleme: Mayıs 2026',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 12,
-                              fontStyle: FontStyle.italic,
+                        // Tıklanabilir İletişim Bölümü
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isEnglish ? 'Contact' : 'İletişim',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 8),
+                            InkWell(
+                              onTap: () async {
+                                final Uri emailLaunchUri = Uri(
+                                  scheme: 'mailto',
+                                  path: 'nmustafa.ozkaya@gmail.com',
+                                  queryParameters: {'subject': 'Pomodoro - Destek Talebi'},
+                                );
+                                try {
+                                  await launchUrl(emailLaunchUri);
+                                } catch (_) {}
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.email, color: Colors.blue, size: 16),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      isEnglish
+                                          ? 'Email: nmustafa.ozkaya@gmail.com'
+                                          : 'E-Posta: nmustafa.ozkaya@gmail.com',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.blue,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () async {
+                                final Uri url = Uri.parse('https://mustafaozkaya.com');
+                                try {
+                                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                                } catch (_) {}
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.language, color: Colors.blue, size: 16),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      isEnglish
+                                          ? 'Website: mustafaozkaya.com'
+                                          : 'Web Sitesi: mustafaozkaya.com',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.blue,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              isEnglish
+                                  ? 'Developer: Mustafa Özkaya'
+                                  : 'Geliştirici: Mustafa Özkaya',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white.withValues(alpha: 0.9),
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        FutureBuilder<PackageInfo>(
+                          future: PackageInfo.fromPlatform(),
+                          builder: (context, snapshot) {
+                            String version = '1.1.4';
+                            if (snapshot.hasData) {
+                              version = snapshot.data!.version;
+                            }
+                            return Center(
+                              child: Text(
+                                isEnglish
+                                    ? 'Version: v$version'
+                                    : 'Sürüm: v$version',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),

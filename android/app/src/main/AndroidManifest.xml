@@ -1,6 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Wear OS özelliği - Phone flavor'da remove edilir -->
-    <uses-feature android:name="android.hardware.type.watch" android:required="true" />
+
     
     <!-- İzinler - Her iki platform için ortak -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -39,10 +38,11 @@
             android:name="flutterEmbedding"
             android:value="2" />
         
-        <!-- Wear OS standalone mode -->
+        <!-- Google AdMob Application ID (Gerçek ID) -->
         <meta-data
-            android:name="com.google.android.wearable.standalone"
-            android:value="false" />
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-8252438794686125~9602878022"/>
+
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
