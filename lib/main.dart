@@ -36,11 +36,7 @@ void main() async {
         stayAwake: true,
       ).build(),
     );
-  } catch (e) {
-    if (kDebugMode) {
-      print('AudioContext configuration error: $e');
-    }
-  }
+  } catch (_) {}
 
   runApp(const MyApp());
 }
