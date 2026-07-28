@@ -25,9 +25,9 @@ class PhoneApp extends StatelessWidget {
       // Font yüklenemezse varsayılan font kullan
       textTheme = ThemeData.light().textTheme;
     }
-    
+
     return MaterialApp(
-      title: 'Pomodoro Timer',
+      title: 'PomoTime',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.deepPurple,
@@ -85,7 +85,6 @@ class _PhoneHomeState extends State<PhoneHome> {
     )..load();
   }
 
-
   @override
   void initState() {
     super.initState();
@@ -106,8 +105,6 @@ class _PhoneHomeState extends State<PhoneHome> {
     _bannerAd?.dispose();
     super.dispose();
   }
-
-
 
   Future<void> _loadSettings() async {
     try {
@@ -238,8 +235,6 @@ class _PhoneHomeState extends State<PhoneHome> {
     }
   }
 
-
-
   Widget _buildBackground() {
     return Stack(
       children: [
@@ -285,13 +280,9 @@ class _PhoneHomeState extends State<PhoneHome> {
       body: Stack(
         children: [
           // Arka plan resmi tüm ekranı kaplasın
-          Positioned.fill(
-            child: _buildBackground(),
-          ),
+          Positioned.fill(child: _buildBackground()),
           // Sayfa içeriği
-          Positioned.fill(
-            child: _buildCurrentPage(),
-          ),
+          Positioned.fill(child: _buildCurrentPage()),
           // Navbar en altta (timer çalışıyorsa gizle)
           if (!_isTimerRunning)
             Positioned(
@@ -858,196 +849,198 @@ class _TimerPageState extends State<_TimerPage>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                // Timer with Hour Marks
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Hour marks around the circle
-                    SizedBox(
-                      width: 350,
-                      height: 350,
-                      child: CustomPaint(painter: HourMarksPainter()),
-                    ),
-                    // Progress indicator (red line from right to left)
-                    if (_isRunning)
+                  // Timer with Hour Marks
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Hour marks around the circle
                       SizedBox(
                         width: 350,
                         height: 350,
-                        child: CustomPaint(
-                          painter: ProgressLinePainter(_getProgress()),
-                        ),
+                        child: CustomPaint(painter: HourMarksPainter()),
                       ),
-                    // Timer Text - Scrollable Time Picker
-                    SizedBox(
-                      width: 260,
-                      height: 260,
-                      child: _showTimeSelector && !_isRunning
-                          ? Padding(
-                              padding: const EdgeInsets.only(top: 20),
-                              child: _buildScrollableTimePicker(),
-                            )
-                          : GestureDetector(
-                              onTap: _toggleTimeSelector,
-                              child: Center(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      _isBreakTime
-                                          ? widget.settings.getText('break')
-                                          : widget.settings.getText('pomodoro'),
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _formatTime(
+                      // Progress indicator (red line from right to left)
+                      if (_isRunning)
+                        SizedBox(
+                          width: 350,
+                          height: 350,
+                          child: CustomPaint(
+                            painter: ProgressLinePainter(_getProgress()),
+                          ),
+                        ),
+                      // Timer Text - Scrollable Time Picker
+                      SizedBox(
+                        width: 260,
+                        height: 260,
+                        child: _showTimeSelector && !_isRunning
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 20),
+                                child: _buildScrollableTimePicker(),
+                              )
+                            : GestureDetector(
+                                onTap: _toggleTimeSelector,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
                                         _isBreakTime
-                                            ? _breakSecondsRemaining
-                                            : _secondsRemaining,
+                                            ? widget.settings.getText('break')
+                                            : widget.settings.getText(
+                                                'pomodoro',
+                                              ),
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.white70,
+                                        ),
                                       ),
-                                      style: const TextStyle(
-                                        fontSize: 48,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _formatTime(
+                                          _isBreakTime
+                                              ? _breakSecondsRemaining
+                                              : _secondsRemaining,
+                                        ),
+                                        style: const TextStyle(
+                                          fontSize: 48,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      _isPaused
-                                          ? widget.settings.getText('paused')
-                                          : '',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.grey[600],
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _isPaused
+                                            ? widget.settings.getText('paused')
+                                            : '',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 40),
+
+                  // Control Buttons
+                  if (_isPaused) ...[
+                    // Two buttons when paused
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Continue button
+                        ElevatedButton.icon(
+                          onPressed: _startTimer,
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(widget.settings.getText('continue')),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 16,
                             ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // Bitir: çalışılan süreyi istatistiğe yazar, zamanlayıcıyı başa alır
+                        ElevatedButton.icon(
+                          onPressed: () => _finishSession(),
+                          icon: const Icon(Icons.flag),
+                          label: Text(widget.settings.getText('finish')),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else if (isTimerFinished) ...[
+                    // Two buttons when timer finished
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Start button
+                        ElevatedButton.icon(
+                          onPressed: _startTimer,
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(widget.settings.getText('start')),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        // Skip button
+                        ElevatedButton.icon(
+                          onPressed: _skipToNext,
+                          icon: const Icon(Icons.skip_next),
+                          label: Text(widget.settings.getText('skip')),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    // Single button when running or stopped
+                    ElevatedButton.icon(
+                      onPressed: _isRunning ? _pauseTimer : _startTimer,
+                      icon: Icon(_isRunning ? Icons.pause : Icons.play_arrow),
+                      label: Text(
+                        _isRunning
+                            ? widget.settings.getText('pause')
+                            : widget.settings.getText('start'),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isRunning
+                            ? Colors.orange
+                            : Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 16,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                      ),
                     ),
                   ],
-                ),
-
-                const SizedBox(height: 40),
-
-                // Control Buttons
-                if (_isPaused) ...[
-                  // Two buttons when paused
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Continue button
-                      ElevatedButton.icon(
-                        onPressed: _startTimer,
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(widget.settings.getText('continue')),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      // Bitir: çalışılan süreyi istatistiğe yazar, zamanlayıcıyı başa alır
-                      ElevatedButton.icon(
-                        onPressed: () => _finishSession(),
-                        icon: const Icon(Icons.flag),
-                        label: Text(widget.settings.getText('finish')),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.deepPurple,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ] else if (isTimerFinished) ...[
-                  // Two buttons when timer finished
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Start button
-                      ElevatedButton.icon(
-                        onPressed: _startTimer,
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(widget.settings.getText('start')),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      // Skip button
-                      ElevatedButton.icon(
-                        onPressed: _skipToNext,
-                        icon: const Icon(Icons.skip_next),
-                        label: Text(widget.settings.getText('skip')),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ] else ...[
-                  // Single button when running or stopped
-                  ElevatedButton.icon(
-                    onPressed: _isRunning ? _pauseTimer : _startTimer,
-                    icon: Icon(_isRunning ? Icons.pause : Icons.play_arrow),
-                    label: Text(
-                      _isRunning
-                          ? widget.settings.getText('pause')
-                          : widget.settings.getText('start'),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isRunning
-                          ? Colors.orange
-                          : Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 16,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(25),
-                      ),
-                    ),
-                  ),
                 ],
-              ],
+              ),
             ),
           ),
-        ),
         ),
       ),
     );
